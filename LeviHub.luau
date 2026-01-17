@@ -1,5 +1,5 @@
 --[[
-    LEVI HUB - Monolithic Edition (Fixed)
+    LEVI HUB - Monolithic Edition (Fixed Icons)
     Attack on Titan: Freedom War
 ]]
 
@@ -316,11 +316,28 @@ local function SetupUI()
     -- Try load icons, but don't fail if they don't load
     pcall(function() NebulaIcons = loadstring(game:HttpGet("https://raw.nebulasoftworks.xyz/nebula-icon-library-loader"))() end)
 
+    -- Define default icon to fallback to (a generic ID)
+    -- This prevents 'nil' errors if icons fail to load
+    -- 6031302931 is a feather icon ID
+    local DEFAULT_ICON_ID = 6031302931 
+    local CROSSHAIR_ICON_ID = 6031763426 
+    local SETTINGS_ICON_ID = 6031280882
+
+    local function GetIcon(name, lib)
+        if NebulaIcons then 
+            local ico = NebulaIcons:GetIcon(name, lib)
+            if ico then return ico end
+        end
+        -- Fallback map
+        if name == 'crosshair' then return CROSSHAIR_ICON_ID end
+        if name == 'settings' then return SETTINGS_ICON_ID end
+        return DEFAULT_ICON_ID
+    end
+
     local Window = Starlight:CreateWindow({
         Name = "Levi Hub",
         Subtitle = IS_LOBBY and "Lobby Mode" or "Monolithic Edition",
-        -- Use a safe fallback for icon if NebulaIcons fails
-        Icon = (NebulaIcons and NebulaIcons:GetIcon('feather', 'Lucide')) or 6031302931,
+        Icon = GetIcon('feather', 'Lucide'),
         LoadingSettings = { Title = "Levi Hub", Subtitle = "Loading..." },
         FileSettings = { ConfigFolder = "LeviHub" },
     })
@@ -334,13 +351,7 @@ local function SetupUI()
     else
         local MainSection = Window:CreateTabSection("Main")
         
-        -- Helper for safe icon getting
-        local function GetIcon(name, lib)
-            if NebulaIcons then return NebulaIcons:GetIcon(name, lib) end
-            return nil
-        end
-        
-        -- Titans Tab
+        -- Titans Tab (Using GetIcon which GUARANTEES a non-nil value)
         local TitansTab = MainSection:CreateTab({ Name = "Titans", Icon = GetIcon('crosshair', 'Lucide') })
         
         local MasterBox = TitansTab:CreateGroupbox({ Name = "Pure Titans", Column = 1 })
@@ -372,7 +383,6 @@ local function SetupUI()
         NapeBox:CreateLabel({Name="Color"}):AddColorPicker({ CurrentValue = Color3.fromRGB(255,0,0), Callback = function(c) getgenv().AOT_CONFIG.NapeColor = c; RefreshAllHitboxes() end })
         NapeBox:CreateSlider({ Name = "Transparency", Range = {0, 1}, Increment = 0.05, CurrentValue = 0, Callback = function(v) getgenv().AOT_CONFIG.NapeTransparency = v; RefreshAllHitboxes() end })
         
-        -- RESTORED DROPDOWN:
         NapeBox:CreateLabel({Name="Material"}):AddDropdown({ 
             Options = MATERIAL_OPTIONS, 
             CurrentOptions = {"ForceField"}, 
@@ -401,7 +411,6 @@ local function SetupUI()
         EyesBox:CreateLabel({Name="Color"}):AddColorPicker({ CurrentValue = Color3.fromRGB(0,255,0), Callback = function(c) getgenv().AOT_CONFIG.EyesColor = c; RefreshAllHitboxes() end })
         EyesBox:CreateSlider({ Name = "Transparency", Range = {0, 1}, Increment = 0.05, CurrentValue = 0, Callback = function(v) getgenv().AOT_CONFIG.EyesTransparency = v; RefreshAllHitboxes() end })
         
-        -- RESTORED DROPDOWN:
         EyesBox:CreateLabel({Name="Material"}):AddDropdown({ 
             Options = MATERIAL_OPTIONS, 
             CurrentOptions = {"ForceField"}, 
