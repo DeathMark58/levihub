@@ -1,5 +1,5 @@
 --[[
-    LEVI HUB - Monolithic Edition (Reverted)
+    LEVI HUB - Monolithic Edition (Fixed)
     Attack on Titan: Freedom War
 ]]
 
@@ -40,6 +40,7 @@ local MATERIAL_OPTIONS = {
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
 
 -- ============================================
@@ -68,6 +69,7 @@ function SpoofEngine:Apply(part, properties, category)
     self.SpoofedParts[part] = originalData
     self.ProcessedParts[part] = true
     
+    -- Apply changes safely
     if properties.Size then part.Size = properties.Size end
     if properties.Transparency then part.Transparency = properties.Transparency end
     if properties.Color then part.Color = properties.Color end
@@ -179,7 +181,10 @@ end
 -- ============================================
 
 local function GetMaterialEnum(materialName)
-    local materials = { ForceField = Enum.Material.ForceField, Neon = Enum.Material.Neon, Glass = Enum.Material.Glass, SmoothPlastic = Enum.Material.SmoothPlastic, Plastic = Enum.Material.Plastic, Brick = Enum.Material.Brick, Metal = Enum.Material.Metal }
+    local materials = { 
+        ForceField = Enum.Material.ForceField, Neon = Enum.Material.Neon, Glass = Enum.Material.Glass, 
+        SmoothPlastic = Enum.Material.SmoothPlastic, Plastic = Enum.Material.Plastic, Brick = Enum.Material.Brick, Metal = Enum.Material.Metal 
+    }
     return materials[materialName] or Enum.Material.ForceField
 end
 
@@ -302,14 +307,20 @@ local function SetupUI()
     local success, result = pcall(function()
         return loadstring(game:HttpGet("https://raw.nebulasoftworks.xyz/starlight"))()
     end)
-    if not success then warn("Failed to load Starlight"); return end
+    if not success then 
+        warn("Failed to load Starlight: " .. tostring(result))
+        return 
+    end
     Starlight = result
+    
+    -- Try load icons, but don't fail if they don't load
     pcall(function() NebulaIcons = loadstring(game:HttpGet("https://raw.nebulasoftworks.xyz/nebula-icon-library-loader"))() end)
 
     local Window = Starlight:CreateWindow({
         Name = "Levi Hub",
         Subtitle = IS_LOBBY and "Lobby Mode" or "Monolithic Edition",
-        Icon = NebulaIcons and NebulaIcons:GetIcon('feather', 'Lucide') or 6031302931,
+        -- Use a safe fallback for icon if NebulaIcons fails
+        Icon = (NebulaIcons and NebulaIcons:GetIcon('feather', 'Lucide')) or 6031302931,
         LoadingSettings = { Title = "Levi Hub", Subtitle = "Loading..." },
         FileSettings = { ConfigFolder = "LeviHub" },
     })
@@ -323,8 +334,14 @@ local function SetupUI()
     else
         local MainSection = Window:CreateTabSection("Main")
         
+        -- Helper for safe icon getting
+        local function GetIcon(name, lib)
+            if NebulaIcons then return NebulaIcons:GetIcon(name, lib) end
+            return nil
+        end
+        
         -- Titans Tab
-        local TitansTab = MainSection:CreateTab({ Name = "Titans", Icon = NebulaIcons and NebulaIcons:GetIcon('crosshair', 'Lucide') })
+        local TitansTab = MainSection:CreateTab({ Name = "Titans", Icon = GetIcon('crosshair', 'Lucide') })
         
         local MasterBox = TitansTab:CreateGroupbox({ Name = "Pure Titans", Column = 1 })
         MasterBox:CreateToggle({
@@ -351,8 +368,20 @@ local function SetupUI()
         NapeBox:CreateSlider({ Name = "Scale X", Range = {1, 6}, Increment = 0.25, CurrentValue = 2.5, Callback = function(v) getgenv().AOT_CONFIG.NapeScaleX = v; RefreshAllHitboxes() end })
         NapeBox:CreateSlider({ Name = "Scale Y", Range = {1, 6}, Increment = 0.25, CurrentValue = 2.5, Callback = function(v) getgenv().AOT_CONFIG.NapeScaleY = v; RefreshAllHitboxes() end })
         NapeBox:CreateSlider({ Name = "Scale Z", Range = {1, 6}, Increment = 0.25, CurrentValue = 2.5, Callback = function(v) getgenv().AOT_CONFIG.NapeScaleZ = v; RefreshAllHitboxes() end })
+        
         NapeBox:CreateLabel({Name="Color"}):AddColorPicker({ CurrentValue = Color3.fromRGB(255,0,0), Callback = function(c) getgenv().AOT_CONFIG.NapeColor = c; RefreshAllHitboxes() end })
         NapeBox:CreateSlider({ Name = "Transparency", Range = {0, 1}, Increment = 0.05, CurrentValue = 0, Callback = function(v) getgenv().AOT_CONFIG.NapeTransparency = v; RefreshAllHitboxes() end })
+        
+        -- RESTORED DROPDOWN:
+        NapeBox:CreateLabel({Name="Material"}):AddDropdown({ 
+            Options = MATERIAL_OPTIONS, 
+            CurrentOptions = {"ForceField"}, 
+            Callback = function(o) 
+                if type(o) == "table" then getgenv().AOT_CONFIG.NapeMaterial = o[1] 
+                else getgenv().AOT_CONFIG.NapeMaterial = o end -- Handle different UI lib return types
+                RefreshAllHitboxes() 
+            end 
+        })
         
         local EyesBox = TitansTab:CreateGroupbox({ Name = "Eyes Hitbox", Column = 2 })
         EyesBox:CreateToggle({
@@ -368,10 +397,22 @@ local function SetupUI()
         EyesBox:CreateSlider({ Name = "Scale X", Range = {1, 6}, Increment = 0.25, CurrentValue = 2, Callback = function(v) getgenv().AOT_CONFIG.EyesScaleX = v; RefreshAllHitboxes() end })
         EyesBox:CreateSlider({ Name = "Scale Y", Range = {1, 6}, Increment = 0.25, CurrentValue = 2, Callback = function(v) getgenv().AOT_CONFIG.EyesScaleY = v; RefreshAllHitboxes() end })
         EyesBox:CreateSlider({ Name = "Scale Z", Range = {1, 6}, Increment = 0.25, CurrentValue = 2, Callback = function(v) getgenv().AOT_CONFIG.EyesScaleZ = v; RefreshAllHitboxes() end })
+        
         EyesBox:CreateLabel({Name="Color"}):AddColorPicker({ CurrentValue = Color3.fromRGB(0,255,0), Callback = function(c) getgenv().AOT_CONFIG.EyesColor = c; RefreshAllHitboxes() end })
         EyesBox:CreateSlider({ Name = "Transparency", Range = {0, 1}, Increment = 0.05, CurrentValue = 0, Callback = function(v) getgenv().AOT_CONFIG.EyesTransparency = v; RefreshAllHitboxes() end })
         
-        local SettingsTab = MainSection:CreateTab({ Name = "Settings", Icon = NebulaIcons and NebulaIcons:GetIcon('settings', 'Lucide') })
+        -- RESTORED DROPDOWN:
+        EyesBox:CreateLabel({Name="Material"}):AddDropdown({ 
+            Options = MATERIAL_OPTIONS, 
+            CurrentOptions = {"ForceField"}, 
+            Callback = function(o) 
+                if type(o) == "table" then getgenv().AOT_CONFIG.EyesMaterial = o[1] 
+                else getgenv().AOT_CONFIG.EyesMaterial = o end
+                RefreshAllHitboxes() 
+            end 
+        })
+        
+        local SettingsTab = MainSection:CreateTab({ Name = "Settings", Icon = GetIcon('settings', 'Lucide') })
         local OptionsBox = SettingsTab:CreateGroupbox({ Name = "Options", Column = 1 })
         OptionsBox:CreateToggle({ Name = "Auto Refresh", CurrentValue = true, Callback = function(v) getgenv().AOT_CONFIG.AutoRefresh = v end })
         OptionsBox:CreateToggle({ Name = "Debug Mode", CurrentValue = false, Callback = function(v) getgenv().AOT_CONFIG.DebugMode = v end })
