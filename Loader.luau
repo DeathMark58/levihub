@@ -314,6 +314,8 @@ if CURRENT_PLACE_ID == LOBBY_PLACE_ID then
     GUI.SetProgress(10, "Lobby Detected...")
     task.wait(0.5)
     
+local LOADER_URL = "https://raw.githubusercontent.com/DeathMark58/levihub/main/Loader.luau"
+
     if queue_on_teleport then
         GUI.SetProgress(50, "Preparing teleport hook...")
         task.wait(0.5)
@@ -322,7 +324,7 @@ if CURRENT_PLACE_ID == LOBBY_PLACE_ID then
             pcall(function()
                 if not game:IsLoaded() then game.Loaded:Wait() end
                 wait(3)
-                local url = "]] .. MAIN_SCRIPT_URL .. [["
+                local url = "]] .. LOADER_URL .. [["
                 loadstring(game:HttpGet(url))()
             end)
         ]]
