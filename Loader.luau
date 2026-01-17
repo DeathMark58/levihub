@@ -109,11 +109,17 @@ if CURRENT_PLACE_ID == LOBBY_PLACE_ID then
                 return
             end
             
-            local execSuccess, execErr = pcall(func)
-            if not execSuccess then
-                warn("[Levi Hub] Critical Error: Script crashed during runtime!")
-                warn("[Levi Hub] Error: " .. tostring(execErr))
-            end
+        local queueScript = [[
+            pcall(function()
+                if not game:IsLoaded() then game.Loaded:Wait() end
+                wait(3) -- Using global wait just in case task is unavailable
+                
+                print("[Levi Hub] Teleport detected!")
+                
+                local url = "]] .. MAIN_SCRIPT_URL .. [["
+                local content = game:HttpGet(url)
+                loadstring(content)()
+            end)
         ]]
         queue_on_teleport(queueScript)
     else
