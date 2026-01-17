@@ -158,7 +158,7 @@ local function CreateGUI()
     SubTitle.Size = UDim2.new(1, 0, 0, 20)
     SubTitle.Position = UDim2.new(0, 0, 0, 140)
     SubTitle.BackgroundTransparency = 1
-    SubTitle.Text = "Premium Script Hub"
+    SubTitle.Text = "Made by Hak"
     SubTitle.Font = Enum.Font.Gotham
     SubTitle.TextSize = 14
     SubTitle.TextColor3 = Color3.fromRGB(150, 150, 160)
