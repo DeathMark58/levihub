@@ -80,9 +80,40 @@ if CURRENT_PLACE_ID == LOBBY_PLACE_ID then
     
     if queue_on_teleport then
         local queueScript = [[
-            repeat task.wait() until game:IsLoaded()
-            task.wait(2)
-            loadstring(game:HttpGet("]] .. MAIN_SCRIPT_URL .. [["))()
+            if not game:IsLoaded() then
+                game.Loaded:Wait()
+            end
+            task.wait(3)
+            
+            -- Debug Prints
+            print("[Levi Hub] Teleport detected, initializing...")
+            
+            local url = "]] .. MAIN_SCRIPT_URL .. [["
+            local content
+            
+            local success, result = pcall(function()
+                content = game:HttpGet(url)
+            end)
+            
+            if not success then
+                warn("[Levi Hub] Critical Error: Failed to download main script!")
+                warn("[Levi Hub] URL: " .. url)
+                warn("[Levi Hub] Error: " .. tostring(result))
+                return
+            end
+            
+            local func, compileErr = loadstring(content)
+            if not func then
+                warn("[Levi Hub] Critical Error: Failed to compile main script!")
+                warn("[Levi Hub] Compiler returned: " .. tostring(compileErr))
+                return
+            end
+            
+            local execSuccess, execErr = pcall(func)
+            if not execSuccess then
+                warn("[Levi Hub] Critical Error: Script crashed during runtime!")
+                warn("[Levi Hub] Error: " .. tostring(execErr))
+            end
         ]]
         queue_on_teleport(queueScript)
     else
