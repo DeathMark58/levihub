@@ -1,6 +1,6 @@
 --[[
     LEVI HUB - Premium Loader
-    Fixed Animation & Watermark logic
+    Conditional UI: Only shows in Lobby
 ]]
 
 local MAIN_SCRIPT_URL = "https://raw.githubusercontent.com/DeathMark58/levihub/main/LeviHub.luau"
@@ -14,7 +14,7 @@ local CoreGui = game:GetService("CoreGui")
 local LocalPlayer = Players.LocalPlayer
 
 -- ============================================
--- UI CREATION
+-- UI CREATION (Conditional)
 -- ============================================
 local function CreateGUI()
     local parent = nil
@@ -51,16 +51,15 @@ local function CreateGUI()
         return c
     end
     
-    -- 1. WATERMARK (Top Right)
-    -- Hidden initially, shown after animation
+    -- 1. WATERMARK (Top Right) -> Only used in Lobby UI flow logically, but we create it here
     local Watermark = Instance.new("Frame")
     Watermark.Name = "Watermark"
-    Watermark.AnchorPoint = Vector2.new(1, 0) -- Top-Right pivot
+    Watermark.AnchorPoint = Vector2.new(1, 0)
     Watermark.Size = UDim2.new(0, 140, 0, 35)
-    Watermark.Position = UDim2.new(1, -20, 0, 20) -- Final position
+    Watermark.Position = UDim2.new(1, -20, 0, 20)
     Watermark.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
     Watermark.BackgroundTransparency = 0 
-    Watermark.Visible = false -- START HIDDEN
+    Watermark.Visible = false 
     Watermark.Parent = ScreenGui
     
     AddCorner(Watermark, 8)
@@ -91,16 +90,15 @@ local function CreateGUI()
     -- 2. SPLASH SCREEN (Center)
     local Splash = Instance.new("Frame")
     Splash.Name = "Splash"
-    Splash.AnchorPoint = Vector2.new(0.5, 0.5) -- Center pivot
+    Splash.AnchorPoint = Vector2.new(0.5, 0.5)
     Splash.Size = UDim2.new(0, 400, 0, 250)
     Splash.Position = UDim2.new(0.5, 0, 0.5, 0) 
     Splash.BackgroundColor3 = Color3.fromRGB(12, 12, 16)
     Splash.BorderSizePixel = 0
-    Splash.Parent = ScreenGui -- Add to GUI
+    Splash.Parent = ScreenGui 
     
     AddCorner(Splash, 16)
     
-    -- Content Container (For easier fading)
     local Content = Instance.new("Frame")
     Content.Size = UDim2.new(1, 0, 1, 0)
     Content.BackgroundTransparency = 1
@@ -171,8 +169,6 @@ local function CreateGUI()
     end
     
     local function Finish()
-        print("[Levi Hub] Starting Finish Animation")
-        
         -- 1. FADE OUT CONTENT
         for _, obj in ipairs(Content:GetDescendants()) do
             if obj:IsA("TextLabel") then
@@ -184,36 +180,25 @@ local function CreateGUI()
         
         task.wait(0.4)
         
-        -- 2. MOVE SPLASH TO TOP RIGHT (Morph Effect)
-        -- Target: Center of the desired Watermark position
-        -- Watermark is at: Pos(1, -20, 0, 20) with Anchor(1,0)
-        -- Its CENTER is at:
-        -- X: 1 scale, offset -20 - (140/2) = -90
-        -- Y: 0 scale, offset 20 + (35/2) = 37.5
-        
+        -- 2. MOVE SPLASH TO TOP RIGHT
         local targetSize = UDim2.new(0, 140, 0, 35)
-        local targetPos = UDim2.new(1, -90, 0, 37.5)
+        local targetPos = UDim2.new(1, -90, 0, 37.5) -- Center of watermark pos
         
         local tweenInfo = TweenInfo.new(0.8, Enum.EasingStyle.Quart, Enum.EasingDirection.InOut)
-        
         local move = TweenService:Create(Splash, tweenInfo, {
             Size = targetSize,
             Position = targetPos,
-            BackgroundColor3 = Color3.fromRGB(15, 15, 20) -- Darker watermark color
+            BackgroundColor3 = Color3.fromRGB(15, 15, 20)
         })
         
         move:Play()
-        move.Completed:Wait() -- Wait for move to finish
+        move.Completed:Wait()
         
         -- 3. SWAP
         Splash.Visible = false
         Watermark.Visible = true
-        
-        -- Make sure Watermark content is visible
         WLogo.TextTransparency = 0
         WText.TextTransparency = 0
-        
-        print("[Levi Hub] Animation Complete")
     end
     
     return {
@@ -222,10 +207,15 @@ local function CreateGUI()
     }
 end
 
-local GUI = CreateGUI()
+-- ============================================
+-- MAIN LOGIC
+-- ============================================
 
 if CURRENT_PLACE_ID == LOBBY_PLACE_ID then
-    -- LOBBY LOGIC
+    -- [ LOBBY MODE ]
+    -- Show UI, Queue Script
+    local GUI = CreateGUI()
+    
     GUI.SetProgress(10, "Lobby Detected...")
     task.wait(0.5)
     
@@ -233,6 +223,9 @@ if CURRENT_PLACE_ID == LOBBY_PLACE_ID then
         GUI.SetProgress(50, "Hooking Teleport...")
         task.wait(0.5)
         
+        -- Queue the LOADER again. 
+        -- Logic: When they join the game, they are NO LONGER in the lobby.
+        -- So running the loader in-game will hit the "else" block below.
         local queueScript = [[
             task.wait(2)
             pcall(function()
@@ -247,27 +240,20 @@ if CURRENT_PLACE_ID == LOBBY_PLACE_ID then
     else
         GUI.SetProgress(0, "Error: No queue_on_teleport")
     end
+    
 else
-    -- GAME LOGIC
-    GUI.SetProgress(20, "Loading LeviHub...")
-    task.wait(0.3)
+    -- [ GAME MODE ] (Or any other place)
+    -- NO UI. Just load the script.
     
     local success, content = pcall(function() return game:HttpGet(MAIN_SCRIPT_URL) end)
-    
     if success then
-        GUI.SetProgress(60, "Compiling...")
         local func = loadstring(content)
         if func then
             task.spawn(func)
-            GUI.SetProgress(100, "Done!")
-            task.wait(0.5)
-            GUI.Finish()
         else
-            GUI.SetProgress(0, "Error: Compile Fail")
-            warn("Compile Fail")
+            warn("[Levi Hub] Compile Failed")
         end
     else
-        GUI.SetProgress(0, "Error: HTTP Fail")
-        warn("HTTP Fail")
+        warn("[Levi Hub] HTTP Failed")
     end
 end
