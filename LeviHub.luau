@@ -12,7 +12,7 @@
 getgenv().SecureMode = true
 
 --// CONSTANTS
-local VERSION = "v0.0.03"
+local VERSION = "v0.0.04"
 local LOBBY_PLACE_ID = 11534222714
 local TITAN_CONTAINER = "OnGameTitans"
 local HITBOX_NAMES = { "Nape", "Eyes" }
@@ -439,6 +439,36 @@ local function StopMainLoop()
     end
 end
 
+--// CLEANUP (called when X button is clicked - no UI operations)
+local function CleanupWithoutUI()
+    print("[Levi Hub] Cleaning up...")
+    
+    -- Stop running flag
+    Running = false
+    
+    -- Stop main loop
+    StopMainLoop()
+    
+    -- Stop titan watcher
+    TitanScanner:Stop()
+    
+    -- Disconnect keybinds
+    if KeybindConnection then
+        KeybindConnection:Disconnect()
+        KeybindConnection = nil
+    end
+    
+    -- Restore ALL parts
+    local stats = SpoofEngine:GetStats()
+    print("[Levi Hub] Restoring " .. stats.Total .. " parts...")
+    SpoofEngine:RestoreAll()
+    
+    -- Clear debug
+    getgenv().AOT = nil
+    
+    print("[Levi Hub] Cleanup complete - all restored")
+end
+
 --// UI MODULE
 local UI = {}
 UI.Starlight = nil
@@ -474,7 +504,14 @@ function UI:CreateWindow()
         FileSettings = {
             ConfigFolder = "LeviHub"
         },
+        DisableNotifications = true, -- Disable "enjoying starlight" notification
     })
+    
+    -- Handle X button close - restore hitboxes
+    self.Starlight:OnDestroy(function()
+        print("[Levi Hub] UI closed via X button, cleaning up...")
+        CleanupWithoutUI()
+    end)
     
     return self.Window
 end
@@ -484,7 +521,7 @@ function UI:SetupTabs()
     
     local GeneralTab = MainSection:CreateTab({
         Name = "General",
-        Icon = self.NebulaIcons:GetIcon('home', 'Lucide'),
+        Icon = self.NebulaIcons:GetIcon('info', 'Lucide'),
         Columns = 2
     }, "GeneralTab")
     
@@ -643,18 +680,6 @@ function UI:SetupTitansTab(tab)
             SpoofEngine:RefreshByType("Nape")
         end
     }, "Idx_NapeMaterial")
-    
-    NapeGroup:CreateButton({
-        Name = "Force Scan",
-        Callback = function()
-            local count = TitanScanner:ScanAll()
-            self.Starlight:Notification({
-                Title = "Levi Hub",
-                Content = "Scanned " .. count .. " titans",
-                Duration = 3
-            })
-        end
-    }, "Idx_ForceScan")
     
     -- Eyes Hitbox Group
     local EyesGroup = tab:CreateGroupbox({
