@@ -211,31 +211,46 @@ local function CreateGUI()
     end
     
     local function Finish()
-        -- Fade out splash
-        local fadeInfo = TweenInfo.new(0.8, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+        -- Animation: Splash shrinks and moves to top right (Watermark position)
+        local tweenInfo = TweenInfo.new(0.8, Enum.EasingStyle.Quart, Enum.EasingDirection.InOut)
         
-        TweenService:Create(Splash, fadeInfo, {
-            Position = UDim2.new(0.5, -200, 0.45, -125), -- Slide up slightly
-            BackgroundTransparency = 1
-        }):Play()
-        
+        -- 1. Fade out the contents of the Splash screen first
         for _, child in ipairs(Splash:GetDescendants()) do
             if child:IsA("TextLabel") then
-                TweenService:Create(child, fadeInfo, {TextTransparency = 1}):Play()
+                TweenService:Create(child, TweenInfo.new(0.3), {TextTransparency = 1}):Play()
             elseif child:IsA("ImageLabel") or child:IsA("Frame") then
-                TweenService:Create(child, fadeInfo, {BackgroundTransparency = 1, ImageTransparency = 1}):Play()
+                TweenService:Create(child, TweenInfo.new(0.3), {BackgroundTransparency = 1, ImageTransparency = 1}):Play()
             end
         end
         
-        -- Show Watermark
-        Watermark.Visible = true
-        Watermark.Position = UDim2.new(1, -150, 0, -40) -- Start above
-        TweenService:Create(Watermark, TweenInfo.new(0.6, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-            Position = UDim2.new(1, -160, 0, 20)
-        }):Play()
+        task.wait(0.3) -- Wait for text to fade
         
-        task.wait(0.8)
-        Splash:Destroy()
+        -- 2. Morph Splash Frame into Watermark Frame
+        -- Watermark Position: UDim2.new(1, -160, 0, 20)
+        -- Watermark Size: UDim2.new(0, 140, 0, 35)
+        
+        local morph = TweenService:Create(Splash, tweenInfo, {
+            Position = UDim2.new(1, -160, 0, 20),
+            Size = UDim2.new(0, 140, 0, 35),
+            BackgroundColor3 = Color3.fromRGB(15, 15, 20) -- Match Watermark color
+        })
+        morph:Play()
+        
+        -- 3. Show Watermark content interacting with the morph
+        morph.Completed:Connect(function()
+            Watermark.Visible = true
+            Watermark.BackgroundTransparency = 1 -- Hide watermark BG, let Splash be the dummy
+            Splash:Destroy() -- Or keep it, but easier to swap
+             
+             -- Make actual watermark visible
+            Watermark.BackgroundTransparency = 0
+            
+            -- Animate Watermark text in
+            WLogo.TextTransparency = 1
+            WText.TextTransparency = 1
+            TweenService:Create(WLogo, TweenInfo.new(0.5), {TextTransparency = 0}):Play()
+            TweenService:Create(WText, TweenInfo.new(0.5), {TextTransparency = 0}):Play()
+        end)
     end
     
     return {
