@@ -10,9 +10,10 @@
 
 --// SECURE MODE (Anti-Detection)
 getgenv().SecureMode = true
+getgenv().StarlightNotify = false -- Disable "enjoying starlight" notification
 
 --// CONSTANTS
-local VERSION = "v0.0.04"
+local VERSION = "v0.0.05"
 local LOBBY_PLACE_ID = 11534222714
 local TITAN_CONTAINER = "OnGameTitans"
 local HITBOX_NAMES = { "Nape", "Eyes" }
@@ -504,7 +505,6 @@ function UI:CreateWindow()
         FileSettings = {
             ConfigFolder = "LeviHub"
         },
-        DisableNotifications = true, -- Disable "enjoying starlight" notification
     })
     
     -- Handle X button close - restore hitboxes
@@ -527,7 +527,7 @@ function UI:SetupTabs()
     
     local TitansTab = MainSection:CreateTab({
         Name = "Titans",
-        Icon = self.NebulaIcons:GetIcon('crosshair', 'Lucide'),
+        Icon = self.NebulaIcons:GetIcon('skull', 'Lucide'),
         Columns = 2
     }, "TitansTab")
     
@@ -676,8 +676,12 @@ function UI:SetupTitansTab(tab)
         Options = MATERIAL_OPTIONS,
         CurrentOption = "ForceField",
         Callback = function(val)
-            Config.Nape.Material = Enum.Material[val]
-            SpoofEngine:RefreshByType("Nape")
+            -- val is a table, get first element
+            local materialName = type(val) == "table" and val[1] or val
+            if materialName and Enum.Material[materialName] then
+                Config.Nape.Material = Enum.Material[materialName]
+                SpoofEngine:RefreshByType("Nape")
+            end
         end
     }, "Idx_NapeMaterial")
     
@@ -776,8 +780,12 @@ function UI:SetupTitansTab(tab)
         Options = MATERIAL_OPTIONS,
         CurrentOption = "ForceField",
         Callback = function(val)
-            Config.Eyes.Material = Enum.Material[val]
-            SpoofEngine:RefreshByType("Eyes")
+            -- val is a table, get first element
+            local materialName = type(val) == "table" and val[1] or val
+            if materialName and Enum.Material[materialName] then
+                Config.Eyes.Material = Enum.Material[materialName]
+                SpoofEngine:RefreshByType("Eyes")
+            end
         end
     }, "Idx_EyesMaterial")
 end
