@@ -9,7 +9,6 @@
 getgenv().SecureMode = true -- Starlight Secure Mode
 
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 -- BYPASS LOADING
@@ -20,18 +19,18 @@ pcall(function() loadstring(game:HttpGet(BYPASS_URL))() end)
 local Config = {
     -- Nape
     NapeEnabled = false,
-    NapeMultiX = 5,
-    NapeMultiY = 5,
-    NapeMultiZ = 5,
+    NapeMultiX = 2,
+    NapeMultiY = 2,
+    NapeMultiZ = 2,
     NapeTransparency = 0,
     NapeColor = Color3.fromRGB(255, 0, 0),
     NapeMaterial = "ForceField",
     
     -- Eyes
     EyesEnabled = false,
-    EyesMultiX = 5,
-    EyesMultiY = 5,
-    EyesMultiZ = 5,
+    EyesMultiX = 2,
+    EyesMultiY = 2,
+    EyesMultiZ = 2,
     EyesTransparency = 0,
     EyesColor = Color3.fromRGB(0, 255, 0),
     EyesMaterial = "ForceField",
@@ -64,21 +63,17 @@ end
 function SpoofEngine:Register(part, property, value)
     if not part then return end
     
-    -- Init tables
     if not self.SpoofedParts[part] then
         self.SpoofedParts[part] = {}
         self.Originals[part] = {}
     end
     
-    -- Save original (IMPORTANT: Only if not already saved to avoid overwriting with modified value)
     if self.Originals[part][property] == nil then
         self.Originals[part][property] = part[property]
     end
     
-    -- Mark as spoofed
     self.SpoofedParts[part][property] = true
     
-    -- Apply visual change
     pcall(function()
         part[property] = value
     end)
@@ -119,13 +114,10 @@ function TitanManager:ProcessHitbox(part, configPrefix)
     local isEnabled = Config[configPrefix .. "Enabled"]
     
     if isEnabled then
-        -- 1. Ensure Original Size is Captured FIRST
-        -- We trigger a dummy read or register to ensure 'Size' is in Originals
         if not SpoofEngine.Originals[part] or not SpoofEngine.Originals[part]["Size"] then
-            SpoofEngine:Register(part, "Size", part.Size) -- Saves current as original, sets current
+            SpoofEngine:Register(part, "Size", part.Size)
         end
         
-        -- 2. Calculate New Size based on ORIGINAL size
         local baseSize = SpoofEngine:GetBaseProperty(part, "Size")
         local newSize = baseSize * Vector3.new(
             Config[configPrefix .. "MultiX"],
@@ -133,7 +125,6 @@ function TitanManager:ProcessHitbox(part, configPrefix)
             Config[configPrefix .. "MultiZ"]
         )
         
-        -- 3. Apply Properties
         SpoofEngine:Register(part, "Size", newSize)
         SpoofEngine:Register(part, "Transparency", Config[configPrefix .. "Transparency"])
         SpoofEngine:Register(part, "Color", Config[configPrefix .. "Color"])
@@ -162,7 +153,6 @@ function TitanManager:Refresh()
 end
 
 function TitanManager:StartLoop()
-    -- Watch Logic
     local function Watch(container)
         local c = container.ChildAdded:Connect(function()
             task.wait(0.5) 
@@ -230,6 +220,7 @@ function Interface:Load()
     }, "TitanTab")
 
     -- Helper to create Hitbox UI
+    -- Ensures NO Placeholder labels
     local function CreateHitboxUI(group, prefix, title)
         group:CreateToggle({
             Name = "Enable " .. title,
@@ -240,14 +231,14 @@ function Interface:Load()
             end
         }, prefix.."Toggle")
         
-        -- Multipliers
-        group:CreateSlider({ Name = "Multiplier X", Range = {1, 20}, Increment = 0.5, CurrentValue = 5,
+        -- Multipliers (Range 1-10, Default 2)
+        group:CreateSlider({ Name = "Multiplier X", Range = {1, 10}, Increment = 0.5, CurrentValue = 2,
             Callback = function(v) Config[prefix.."MultiX"] = v; TitanManager:Refresh() end }, prefix.."MultiX")
             
-        group:CreateSlider({ Name = "Multiplier Y", Range = {1, 20}, Increment = 0.5, CurrentValue = 5,
+        group:CreateSlider({ Name = "Multiplier Y", Range = {1, 10}, Increment = 0.5, CurrentValue = 2,
             Callback = function(v) Config[prefix.."MultiY"] = v; TitanManager:Refresh() end }, prefix.."MultiY")
             
-        group:CreateSlider({ Name = "Multiplier Z", Range = {1, 20}, Increment = 0.5, CurrentValue = 5,
+        group:CreateSlider({ Name = "Multiplier Z", Range = {1, 10}, Increment = 0.5, CurrentValue = 2,
             Callback = function(v) Config[prefix.."MultiZ"] = v; TitanManager:Refresh() end }, prefix.."MultiZ")
         
         -- Visuals
@@ -279,7 +270,7 @@ function Interface:Load()
     -- 4. Shifter Tab
     local ShifterTab = MainSection:CreateTab({
         Name = "Shifters",
-        Icon = NebulaIcons:GetIcon('flash', 'Lucide'), -- flash_on is Material, flash is Lucide
+        Icon = NebulaIcons:GetIcon('flash', 'Lucide'), 
         Columns = 2
     }, "ShifterTab")
     ShifterTab:CreateGroupbox({Name = "Shifters", Column = 1}, "ShifterGroup"):CreateLabel({Name = "Coming Soon"}, "CS2")
@@ -292,6 +283,12 @@ function Interface:Load()
     }, "SettingsTab")
     
     local ConfigGroup = SettingsTab:CreateGroupbox({ Name = "Configuration", Column = 1 }, "ConfigGroup")
+    
+    -- Config System via Starlight
+    SettingsTab:BuildConfigGroupbox(ConfigGroup)
+
+    ConfigGroup:CreateDivider()
+    
     ConfigGroup:CreateButton({
         Name = "Unload Script",
         Callback = function()
