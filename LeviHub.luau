@@ -1,469 +1,366 @@
 --[[
-    LEVI HUB - Monolithic Edition (Strict Fix)
-    Attack on Titan: Freedom War
+    LEVI HUB - Attack on Titan: Freedom War
+    Version: v0.0.01
 ]]
 
--- ============================================
--- CONFIGURATION
--- ============================================
-local LOBBY_PLACE_ID = 11534222714
-local CURRENT_PLACE_ID = game.PlaceId
-local IS_LOBBY = (CURRENT_PLACE_ID == LOBBY_PLACE_ID)
+-- ============================================================================
+-- 1. INIT & VARIABLES
+-- ============================================================================
+getgenv().SecureMode = true -- Starlight Secure Mode
 
-getgenv().AOT_CONFIG = {
-    PureTitanEnabled = false,
-    NapeEnabled = false,
-    NapeScaleX = 2.5,
-    NapeScaleY = 2.5,
-    NapeScaleZ = 2.5,
-    NapeColor = Color3.fromRGB(255, 0, 0),
-    NapeTransparency = 0,
-    NapeMaterial = "ForceField",
-    EyesEnabled = false,
-    EyesScaleX = 2.0,
-    EyesScaleY = 2.0,
-    EyesScaleZ = 2.0,
-    EyesColor = Color3.fromRGB(0, 255, 0),
-    EyesTransparency = 0,
-    EyesMaterial = "ForceField",
-    DebugMode = false,
-    AutoRefresh = true,
-}
-
-local MATERIAL_OPTIONS = {
-    "ForceField", "Neon", "Glass", "SmoothPlastic", "Plastic", "Brick", "Metal"
-}
-
--- ============================================
--- SERVICES & VARIABLES
--- ============================================
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
-local LocalPlayer = Players.LocalPlayer
+local StarterGui = game:GetService("StarterGui")
+local CoreGui = game:GetService("CoreGui")
+local Workspace = game:GetService("Workspace")
 
--- ============================================
--- SPOOF ENGINE
--- ============================================
+-- BYPASS LOADING (Before anything else)
+local BYPASS_URL = "https://raw.githubusercontent.com/Pixeluted/adoniscries/refs/heads/main/Source.lua"
+pcall(function() loadstring(game:HttpGet(BYPASS_URL))() end)
+
+-- CONFIG
+local Config = {
+    -- Titans
+    NapeEnabled = false,
+    NapeScale = 5,
+    NapeTransparency = 0.5,
+    NapeColor = Color3.fromRGB(255, 0, 0),
+    
+    EyesEnabled = false,
+    EyesScale = 3,
+    EyesTransparency = 0.5,
+    EyesColor = Color3.fromRGB(0, 255, 0),
+    
+    HitboxMaterial = "ForceField",
+}
+
+-- SERVICES & VARS
 local SpoofEngine = {}
+local TitanManager = {}
+local Interface = {}
+
+-- ============================================================================
+-- 2. SPOOF ENGINE (Modular)
+-- ============================================================================
 SpoofEngine.SpoofedParts = {}
-SpoofEngine.ProcessedParts = {}
-SpoofEngine.HookedTitans = {}
-SpoofEngine.Connections = {}
+SpoofEngine.Originals = {} -- Backup of original properties
 SpoofEngine.OldIndex = nil
 
-function SpoofEngine:Apply(part, properties, category)
-    if not part or not part:IsA("BasePart") then return false end
-    if self.ProcessedParts[part] then return false end
+function SpoofEngine:Setup()
+    if self.OldIndex then return end
     
-    local originalData = {
-        Size = part.Size,
-        Transparency = part.Transparency,
-        Color = part.Color,
-        BrickColor = part.BrickColor,
-        Material = part.Material,
-        Category = category
-    }
+    self.OldIndex = hookmetamethod(game, "__index", newcclosure(function(self_inst, key)
+        local spoofed = SpoofEngine.SpoofedParts[self_inst]
+        if spoofed and spoofed[key] ~= nil then
+            return SpoofEngine.Originals[self_inst][key]
+        end
+        return SpoofEngine.OldIndex(self_inst, key)
+    end))
+end
+
+function SpoofEngine:Register(part, property, value)
+    if not part then return end
     
-    self.SpoofedParts[part] = originalData
-    self.ProcessedParts[part] = true
+    -- Init tables if new part
+    if not self.SpoofedParts[part] then
+        self.SpoofedParts[part] = {}
+        self.Originals[part] = {}
+    end
     
-    -- Apply changes safely
-    if properties.Size then part.Size = properties.Size end
-    if properties.Transparency then part.Transparency = properties.Transparency end
-    if properties.Color then part.Color = properties.Color end
-    if properties.Material then part.Material = properties.Material end
+    -- Save original if not saved
+    if self.Originals[part][property] == nil then
+        self.Originals[part][property] = part[property]
+    end
     
-    return true
+    -- Mark as spoofed
+    self.SpoofedParts[part][property] = true
+    
+    -- Apply visual change safely
+    pcall(function()
+        part[property] = value
+    end)
 end
 
 function SpoofEngine:Restore(part)
-    local data = self.SpoofedParts[part]
-    if not data then return false end
+    if not part or not self.Originals[part] then return end
     
-    if part and part.Parent then
-        pcall(function()
-            part.Size = data.Size
-            part.Transparency = data.Transparency
-            part.Color = data.Color
-            part.Material = data.Material
-        end)
+    for prop, val in pairs(self.Originals[part]) do
+        pcall(function() part[prop] = val end)
     end
     
     self.SpoofedParts[part] = nil
-    self.ProcessedParts[part] = nil
-    return true
+    self.Originals[part] = nil
 end
 
-function SpoofEngine:RestoreCategory(category)
-    local restored = 0
-    for part, data in pairs(self.SpoofedParts) do
-        if data.Category == category then
-            if self:Restore(part) then restored = restored + 1 end
-        end
+function SpoofEngine:RestoreAll()
+    for part, _ in pairs(self.SpoofedParts) do
+        self:Restore(part)
     end
-    return restored
 end
 
-function SpoofEngine:UpdateCategory(category, properties)
-    local updated = 0
-    for part, data in pairs(self.SpoofedParts) do
-        if data.Category == category and part and part.Parent then
-            pcall(function()
-                if properties.Scale then
-                    local origSize = data.Size
-                    part.Size = Vector3.new(origSize.X * properties.Scale.X, origSize.Y * properties.Scale.Y, origSize.Z * properties.Scale.Z)
+-- ============================================================================
+-- 3. TITAN MANAGER (Logic)
+-- ============================================================================
+TitanManager.Connections = {}
+
+function TitanManager:GetHitboxMaterial()
+    return Enum.Material[Config.HitboxMaterial] or Enum.Material.ForceField
+end
+
+function TitanManager:Refresh()
+    -- Only refresh what's needed, simplest way is to re-apply active settings
+    -- Because SpoofEngine prevents duplicates, we can just re-scan relevant parts
+    local container = Workspace:FindFirstChild("OnGameTitans")
+    if not container then return end
+    
+    for _, model in ipairs(container:GetChildren()) do
+        if model:IsA("Model") then
+            -- Nape
+            local nape = model:FindFirstChild("Nape")
+            if nape and nape:IsA("BasePart") then
+                if Config.NapeEnabled then
+                    local size = Vector3.new(Config.NapeScale, Config.NapeScale, Config.NapeScale) -- Simplification for now
+                    if nape.Size.X < 50 then -- Sanity check preventing infinite growth if logic fails
+                         -- For precise scaling we need original size, but for now we just set fixed large size or multiplier
+                         -- Best approach: Reset first then apply
+                         SpoofEngine:Restore(nape) 
+                         
+                         -- Apply changes
+                         SpoofEngine:Register(nape, "Size", nape.Size * Config.NapeScale)
+                         SpoofEngine:Register(nape, "Transparency", Config.NapeTransparency)
+                         SpoofEngine:Register(nape, "Color", Config.NapeColor)
+                         SpoofEngine:Register(nape, "Material", self:GetHitboxMaterial())
+                         SpoofEngine:Register(nape, "CanCollide", false)
+                    end
+                else
+                    SpoofEngine:Restore(nape)
                 end
-                if properties.Transparency then part.Transparency = properties.Transparency end
-                if properties.Color then part.Color = properties.Color end
-                if properties.Material then part.Material = properties.Material end
-                updated = updated + 1
-            end)
-        end
-    end
-    return updated
-end
-
-function SpoofEngine:SetupHooks()
-    if IS_LOBBY then return end
-    if self.OldIndex then return end
-    
-    self.OldIndex = hookmetamethod(game, "__index", newcclosure(function(self_ref, key)
-        local spoofData = SpoofEngine.SpoofedParts[self_ref]
-        if spoofData then
-            local success, result = pcall(function()
-                if key == "Size" and spoofData.Size then return spoofData.Size
-                elseif key == "Transparency" and spoofData.Transparency then return spoofData.Transparency
-                elseif key == "Color" and spoofData.Color then return spoofData.Color
-                elseif key == "BrickColor" and spoofData.BrickColor then return spoofData.BrickColor
-                elseif key == "Material" and spoofData.Material then return spoofData.Material
+            end
+            
+            -- Eyes
+            local eyes = model:FindFirstChild("Eyes")
+            if eyes and eyes:IsA("BasePart") then
+                if Config.EyesEnabled then
+                     SpoofEngine:Restore(eyes)
+                     SpoofEngine:Register(eyes, "Size", eyes.Size * Config.EyesScale)
+                     SpoofEngine:Register(eyes, "Transparency", Config.EyesTransparency)
+                     SpoofEngine:Register(eyes, "Color", Config.EyesColor)
+                     SpoofEngine:Register(eyes, "Material", self:GetHitboxMaterial())
+                     SpoofEngine:Register(eyes, "CanCollide", false)
+                else
+                    SpoofEngine:Restore(eyes)
                 end
-                return nil
-            end)
-            if success and result ~= nil then return result end
-        end
-        return SpoofEngine.OldIndex(self_ref, key)
-    end))
-    print("[Levi Hub] Metatable hooks installed")
-end
-
-function SpoofEngine:GetStats()
-    local napeCount, eyesCount, titanCount = 0, 0, 0
-    for _, data in pairs(self.SpoofedParts) do
-        if data.Category == "PureTitan_Nape" then napeCount = napeCount + 1
-        elseif data.Category == "PureTitan_Eyes" then eyesCount = eyesCount + 1 end
-    end
-    for _ in pairs(self.HookedTitans) do titanCount = titanCount + 1 end
-    return { Titans = titanCount, NapeParts = napeCount, EyesParts = eyesCount }
-end
-
-function SpoofEngine:Cleanup()
-    for _, conn in ipairs(self.Connections) do if conn.Connected then conn:Disconnect() end end
-    self.Connections = {}
-    for part, data in pairs(self.SpoofedParts) do
-        if part and part.Parent then
-            pcall(function()
-                part.Size = data.Size
-                part.Transparency = data.Transparency
-                part.Color = data.Color
-                part.Material = data.Material
-            end)
-        end
-    end
-    self.SpoofedParts = {}
-    self.ProcessedParts = {}
-    self.HookedTitans = {}
-end
-
--- ============================================
--- TITAN MANAGER
--- ============================================
-
-local function GetMaterialEnum(materialName)
-    local materials = { 
-        ForceField = Enum.Material.ForceField, Neon = Enum.Material.Neon, Glass = Enum.Material.Glass, 
-        SmoothPlastic = Enum.Material.SmoothPlastic, Plastic = Enum.Material.Plastic, Brick = Enum.Material.Brick, Metal = Enum.Material.Metal 
-    }
-    return materials[materialName] or Enum.Material.ForceField
-end
-
-local function ProcessHitbox(part, hitboxType)
-    if not part or not part:IsA("BasePart") then return false end
-    local config = getgenv().AOT_CONFIG
-    local category = "PureTitan_" .. hitboxType
-    local scaleX, scaleY, scaleZ, color, list_transparency, material
-    
-    if hitboxType == "Nape" then
-        if not config.NapeEnabled then return false end
-        scaleX, scaleY, scaleZ = config.NapeScaleX, config.NapeScaleY, config.NapeScaleZ
-        color = config.NapeColor
-        list_transparency = config.NapeTransparency
-        material = GetMaterialEnum(config.NapeMaterial)
-    else
-        if not config.EyesEnabled then return false end
-        scaleX, scaleY, scaleZ = config.EyesScaleX, config.EyesScaleY, config.EyesScaleZ
-        color = config.EyesColor
-        list_transparency = config.EyesTransparency
-        material = GetMaterialEnum(config.EyesMaterial)
-    end
-    
-    local newSize = Vector3.new(part.Size.X * scaleX, part.Size.Y * scaleY, part.Size.Z * scaleZ)
-    return SpoofEngine:Apply(part, { Size = newSize, Transparency = list_transparency, Color = color, Material = material }, category)
-end
-
-local function FindHitboxWithRetry(titanModel, hitboxName, maxAttempts)
-    maxAttempts = maxAttempts or 5
-    for attempt = 1, maxAttempts do
-        for _, child in ipairs(titanModel:GetDescendants()) do
-            if child:IsA("BasePart") and child.Name == hitboxName then return child end
-        end
-        if attempt < maxAttempts then task.wait(0.3) end
-    end
-    return nil
-end
-
-local function ProcessTitan(titanModel)
-    if SpoofEngine.HookedTitans[titanModel] then return 0 end
-    SpoofEngine.HookedTitans[titanModel] = true
-    if not getgenv().AOT_CONFIG.PureTitanEnabled then return 0 end
-    
-    local totalParts = 0
-    if getgenv().AOT_CONFIG.NapeEnabled then
-        local nape = FindHitboxWithRetry(titanModel, "Nape", 5)
-        if nape and ProcessHitbox(nape, "Nape") then totalParts = totalParts + 1 end
-    end
-    if getgenv().AOT_CONFIG.EyesEnabled then
-        local eyes = FindHitboxWithRetry(titanModel, "Eyes", 5)
-        if eyes and ProcessHitbox(eyes, "Eyes") then totalParts = totalParts + 1 end
-    end
-    return totalParts
-end
-
-local function ScanAllTitans()
-    if IS_LOBBY then return 0, 0 end
-    local totalTitans, totalParts = 0, 0
-    local titanContainer = workspace:FindFirstChild("OnGameTitans")
-    if titanContainer then
-        for _, titan in ipairs(titanContainer:GetChildren()) do
-            if titan:IsA("Model") and not SpoofEngine.HookedTitans[titan] then
-                local parts = ProcessTitan(titan)
-                if parts > 0 then totalTitans = totalTitans + 1; totalParts = totalParts + parts end
             end
         end
     end
-    return totalTitans, totalParts
 end
 
-local function SetupTitanWatcher()
-    if IS_LOBBY then return end
-    
-    local function WatchContainer(container)
-        local conn = container.ChildAdded:Connect(function(child)
-            if child:IsA("Model") then task.wait(0.5); ProcessTitan(child) end
+function TitanManager:StartLoop()
+    -- Watch for new titans
+    local function Watch(container)
+        local c = container.ChildAdded:Connect(function(child)
+            task.wait(0.5) -- Wait for parts to load
+            TitanManager:Refresh()
         end)
-        table.insert(SpoofEngine.Connections, conn)
+        table.insert(self.Connections, c)
     end
     
-    local titanContainer = workspace:FindFirstChild("OnGameTitans")
-    if titanContainer then WatchContainer(titanContainer) end
+    if Workspace:FindFirstChild("OnGameTitans") then
+        Watch(Workspace.OnGameTitans)
+    end
     
-    local conn2 = workspace.ChildAdded:Connect(function(child)
+    local c2 = Workspace.ChildAdded:Connect(function(child)
         if child.Name == "OnGameTitans" then
-            task.wait(0.5)
-            ScanAllTitans()
-            WatchContainer(child)
+            Watch(child)
         end
     end)
-    table.insert(SpoofEngine.Connections, conn2)
-end
-
-local function RefreshAllHitboxes()
-    local config = getgenv().AOT_CONFIG
-    SpoofEngine:UpdateCategory("PureTitan_Nape", { Scale = Vector3.new(config.NapeScaleX, config.NapeScaleY, config.NapeScaleZ), Transparency = config.NapeTransparency, Color = config.NapeColor, Material = GetMaterialEnum(config.NapeMaterial) })
-    SpoofEngine:UpdateCategory("PureTitan_Eyes", { Scale = Vector3.new(config.EyesScaleX, config.EyesScaleY, config.EyesScaleZ), Transparency = config.EyesTransparency, Color = config.EyesColor, Material = GetMaterialEnum(config.EyesMaterial) })
-end
-
-local function RescanAllTitans()
-    SpoofEngine.HookedTitans = {}
-    SpoofEngine.ProcessedParts = {}
-    for part, data in pairs(SpoofEngine.SpoofedParts) do
-        if part and part.Parent then
-            pcall(function() part.Size = data.Size; part.Transparency = data.Transparency; part.Color = data.Color; part.Material = data.Material end)
-        end
-    end
-    SpoofEngine.SpoofedParts = {}
-    return ScanAllTitans()
-end
-
--- ============================================
--- UI SETUP
--- ============================================
-
-local Starlight = nil
-local NebulaIcons = nil
-
-local function SetupUI()
-    local success, result = pcall(function()
-        return loadstring(game:HttpGet("https://raw.nebulasoftworks.xyz/starlight"))()
-    end)
-    if not success then 
-        warn("Failed to load Starlight: " .. tostring(result))
-        return 
-    end
-    Starlight = result
+    table.insert(self.Connections, c2)
     
-    pcall(function() NebulaIcons = loadstring(game:HttpGet("https://raw.nebulasoftworks.xyz/nebula-icon-library-loader"))() end)
-
-    -- Define explicit fallback IDs as STRINGS to prevent concatenation errors
-    local DEFAULT_ICON = "rbxassetid://6031302931"
-    local CROSSHAIR_ICON = "rbxassetid://6031763426"
-    local SETTINGS_ICON = "rbxassetid://6031280882"
-
-    local function GetIcon(name, lib)
-        local final_icon = DEFAULT_ICON
-        if name == 'crosshair' then final_icon = CROSSHAIR_ICON end
-        if name == 'settings' then final_icon = SETTINGS_ICON end
-
-        if NebulaIcons then 
-            local p_success, p_result = pcall(function() 
-                return NebulaIcons:GetIcon(name, lib or 'Material') 
-            end)
-            if p_success and p_result and type(p_result) == "string" and #p_result > 0 then
-                return p_result
-            end
+    -- Auto refresh loop
+    task.spawn(function()
+        while true do
+            task.wait(2)
+            TitanManager:Refresh()
         end
-        return final_icon
-    end
+    end)
+end
+
+-- ============================================================================
+-- 4. INTERFACE (Starlight)
+-- ============================================================================
+function Interface:Load()
+    local Starlight = loadstring(game:HttpGet("https://raw.nebulasoftworks.xyz/starlight"))()
+    local NebulaIcons = loadstring(game:HttpGet("https://raw.nebulasoftworks.xyz/nebula-icon-library-loader"))()
 
     local Window = Starlight:CreateWindow({
         Name = "Levi Hub",
-        Subtitle = IS_LOBBY and "Lobby Mode" or "Monolithic Edition",
-        Icon = GetIcon('feather', 'Lucide'),
-        LoadingSettings = { Title = "Levi Hub", Subtitle = "Loading..." },
-        FileSettings = { ConfigFolder = "LeviHub" },
+        Subtitle = "v0.0.01",
+        Icon = NebulaIcons:GetIcon('feather', 'Lucide'),
+        LoadingSettings = {
+            Title = "Levi Hub",
+            Subtitle = "Loading...",
+        },
+        FileSettings = {
+            ConfigFolder = "LeviHub"
+        },
     })
+
+    local MainSection = Window:CreateTabSection("Main")
+
+    -- 1. General Tab
+    local GeneralTab = MainSection:CreateTab({
+        Name = "General",
+        Icon = NebulaIcons:GetIcon('home', 'Material'),
+        Columns = 1
+    }, "GeneralTab")
     
-    if IS_LOBBY then
-        local MainSection = Window:CreateTabSection("Main")
-        local LobbyTab = MainSection:CreateTab({ Name = "Lobby", Columns = 1 }, "LobbyTab")
-        local InfoBox = LobbyTab:CreateGroupbox({ Name = "Waiting", Column = 1 })
-        InfoBox:CreateParagraph({ Name = "Status", Content = "You are in the lobby.\nFeature activation waiting for game join." })
-        Starlight:Notification({ Title = "Levi Hub", Content = "Lobby Mode Active", Duration = 3 })
-    else
-        local MainSection = Window:CreateTabSection("Main")
-        
-        -- Titans Tab
-        -- Using GetIcon which now guarantees a string "rbxassetid://..."
-        local TitansTab = MainSection:CreateTab({ 
-            Name = "Titans", 
-            Icon = GetIcon('crosshair', 'Material'),
-            Columns = 2
-        }, "TitansTab")
-        
-        local MasterBox = TitansTab:CreateGroupbox({ Name = "Pure Titans", Column = 1 })
-        MasterBox:CreateToggle({
-            Name = "Pure Titan Hitbox Changer",
-            CurrentValue = false,
-            Callback = function(value)
-                getgenv().AOT_CONFIG.PureTitanEnabled = value
-                if value then RescanAllTitans()
-                else SpoofEngine:RestoreCategory("PureTitan_Nape"); SpoofEngine:RestoreCategory("PureTitan_Eyes") end
-            end
-        })
-        
-        local NapeBox = TitansTab:CreateGroupbox({ Name = "Nape Hitbox", Column = 1 })
-        NapeBox:CreateToggle({
-            Name = "Enable Nape Hitbox",
-            CurrentValue = false,
-            Callback = function(value)
-                getgenv().AOT_CONFIG.NapeEnabled = value
-                if getgenv().AOT_CONFIG.PureTitanEnabled then
-                    if value then RescanAllTitans() else SpoofEngine:RestoreCategory("PureTitan_Nape") end
-                end
-            end
-        })
-        NapeBox:CreateSlider({ Name = "Scale X", Range = {1, 6}, Increment = 0.25, CurrentValue = 2.5, Callback = function(v) getgenv().AOT_CONFIG.NapeScaleX = v; RefreshAllHitboxes() end })
-        NapeBox:CreateSlider({ Name = "Scale Y", Range = {1, 6}, Increment = 0.25, CurrentValue = 2.5, Callback = function(v) getgenv().AOT_CONFIG.NapeScaleY = v; RefreshAllHitboxes() end })
-        NapeBox:CreateSlider({ Name = "Scale Z", Range = {1, 6}, Increment = 0.25, CurrentValue = 2.5, Callback = function(v) getgenv().AOT_CONFIG.NapeScaleZ = v; RefreshAllHitboxes() end })
-        
-        NapeBox:CreateLabel({Name="Color"}):AddColorPicker({ CurrentValue = Color3.fromRGB(255,0,0), Callback = function(c) getgenv().AOT_CONFIG.NapeColor = c; RefreshAllHitboxes() end })
-        NapeBox:CreateSlider({ Name = "Transparency", Range = {0, 1}, Increment = 0.05, CurrentValue = 0, Callback = function(v) getgenv().AOT_CONFIG.NapeTransparency = v; RefreshAllHitboxes() end })
-        
-        NapeBox:CreateLabel({Name="Material"}):AddDropdown({ 
-            Options = MATERIAL_OPTIONS, 
-            CurrentOptions = {"ForceField"}, 
-            Callback = function(o) 
-                if type(o) == "table" then getgenv().AOT_CONFIG.NapeMaterial = o[1] 
-                else getgenv().AOT_CONFIG.NapeMaterial = o end 
-                RefreshAllHitboxes() 
-            end 
-        })
-        
-        local EyesBox = TitansTab:CreateGroupbox({ Name = "Eyes Hitbox", Column = 2 })
-        EyesBox:CreateToggle({
-            Name = "Enable Eyes Hitbox",
-            CurrentValue = false,
-            Callback = function(value)
-                getgenv().AOT_CONFIG.EyesEnabled = value
-                if getgenv().AOT_CONFIG.PureTitanEnabled then
-                    if value then RescanAllTitans() else SpoofEngine:RestoreCategory("PureTitan_Eyes") end
-                end
-            end
-        })
-        EyesBox:CreateSlider({ Name = "Scale X", Range = {1, 6}, Increment = 0.25, CurrentValue = 2, Callback = function(v) getgenv().AOT_CONFIG.EyesScaleX = v; RefreshAllHitboxes() end })
-        EyesBox:CreateSlider({ Name = "Scale Y", Range = {1, 6}, Increment = 0.25, CurrentValue = 2, Callback = function(v) getgenv().AOT_CONFIG.EyesScaleY = v; RefreshAllHitboxes() end })
-        EyesBox:CreateSlider({ Name = "Scale Z", Range = {1, 6}, Increment = 0.25, CurrentValue = 2, Callback = function(v) getgenv().AOT_CONFIG.EyesScaleZ = v; RefreshAllHitboxes() end })
-        
-        EyesBox:CreateLabel({Name="Color"}):AddColorPicker({ CurrentValue = Color3.fromRGB(0,255,0), Callback = function(c) getgenv().AOT_CONFIG.EyesColor = c; RefreshAllHitboxes() end })
-        EyesBox:CreateSlider({ Name = "Transparency", Range = {0, 1}, Increment = 0.05, CurrentValue = 0, Callback = function(v) getgenv().AOT_CONFIG.EyesTransparency = v; RefreshAllHitboxes() end })
-        
-        EyesBox:CreateLabel({Name="Material"}):AddDropdown({ 
-            Options = MATERIAL_OPTIONS, 
-            CurrentOptions = {"ForceField"}, 
-            Callback = function(o) 
-                if type(o) == "table" then getgenv().AOT_CONFIG.EyesMaterial = o[1] 
-                else getgenv().AOT_CONFIG.EyesMaterial = o end
-                RefreshAllHitboxes() 
-            end 
-        })
-        
-        local SettingsTab = MainSection:CreateTab({ 
-            Name = "Settings", 
-            Icon = GetIcon('settings', 'Material'),
-            Columns = 1 
-        }, "SettingsTab")
-        
-        local OptionsBox = SettingsTab:CreateGroupbox({ Name = "Options", Column = 1 })
-        OptionsBox:CreateToggle({ Name = "Auto Refresh", CurrentValue = true, Callback = function(v) getgenv().AOT_CONFIG.AutoRefresh = v end })
-        OptionsBox:CreateToggle({ Name = "Debug Mode", CurrentValue = false, Callback = function(v) getgenv().AOT_CONFIG.DebugMode = v end })
-        OptionsBox:CreateButton({ Name = "Force Scan", Callback = function() local t,p = ScanAllTitans(); Starlight:Notification({Title="Scan", Content=t.." titans", Duration=3}) end })
-        OptionsBox:CreateButton({ Name = "Show Stats", Callback = function() local s = SpoofEngine:GetStats(); Starlight:Notification({Title="Stats", Content="Nape: "..s.NapeParts.." | Eyes: "..s.EyesParts, Duration=3}) end })
-    end
+    local HomeGroup = GeneralTab:CreateGroupbox({ Name = "Dashboard", Column = 1 }, "HomeGroup")
+    HomeGroup:CreateParagraph({ Name = "Welcome", Content = "Welcome to Levi Hub.\nVersion: v0.0.01\nStatus: Beta" }, "WelcomePara")
+
+    -- 2. Human Tab
+    local HumanTab = MainSection:CreateTab({
+        Name = "Human",
+        Icon = NebulaIcons:GetIcon('person', 'Material'),
+        Columns = 2
+    }, "HumanTab")
+    -- Placeholders
+    HumanTab:CreateGroupbox({Name = "Movement", Column = 1}, "MoveGroup"):CreateLabel({Name = "Coming Soon"}, "CS1")
+
+    -- 3. Titan Tab (Features)
+    local TitanTab = MainSection:CreateTab({
+        Name = "Titans",
+        Icon = NebulaIcons:GetIcon('crosshair', 'Material'), 
+        Columns = 2
+    }, "TitanTab")
+
+    -- Nape Group
+    local NapeGroup = TitanTab:CreateGroupbox({ Name = "Nape Hitbox", Column = 1 }, "NapeGroup")
     
+    NapeGroup:CreateToggle({
+        Name = "Enable Nape Expander",
+        CurrentValue = false,
+        Callback = function(v)
+            Config.NapeEnabled = v
+            TitanManager:Refresh()
+        end
+    }, "NapeToggle")
+    
+    NapeGroup:CreateSlider({
+        Name = "Scale",
+        Range = {1, 20},
+        Increment = 0.5,
+        CurrentValue = 5,
+        Callback = function(v)
+            Config.NapeScale = v
+            TitanManager:Refresh()
+        end
+    }, "NapeScale")
+    
+    NapeGroup:CreateSlider({
+        Name = "Transparency",
+        Range = {0, 1},
+        Increment = 0.1,
+        CurrentValue = 0.5,
+        Callback = function(v)
+            Config.NapeTransparency = v
+            TitanManager:Refresh()
+        end
+    }, "NapeTrans")
+    
+    NapeGroup:CreateLabel({Name = "Color"}):AddColorPicker({
+        CurrentValue = Color3.fromRGB(255, 0, 0),
+        Callback = function(v)
+            Config.NapeColor = v
+            TitanManager:Refresh()
+        end
+    }, "NapeColor")
+
+    -- Eyes Group
+    local EyesGroup = TitanTab:CreateGroupbox({ Name = "Eyes Hitbox", Column = 2 }, "EyesGroup")
+    
+    EyesGroup:CreateToggle({
+        Name = "Enable Eyes Expander",
+        CurrentValue = false,
+        Callback = function(v)
+            Config.EyesEnabled = v
+            TitanManager:Refresh()
+        end
+    }, "EyesToggle")
+    
+    EyesGroup:CreateSlider({
+        Name = "Scale",
+        Range = {1, 20},
+        Increment = 0.5,
+        CurrentValue = 3,
+        Callback = function(v)
+            Config.EyesScale = v
+            TitanManager:Refresh()
+        end
+    }, "EyesScale")
+    
+    EyesGroup:CreateSlider({
+        Name = "Transparency",
+        Range = {0, 1},
+        Increment = 0.1,
+        CurrentValue = 0.5,
+        Callback = function(v)
+            Config.EyesTransparency = v
+            TitanManager:Refresh()
+        end
+    }, "EyesTrans")
+    
+    EyesGroup:CreateLabel({Name = "Color"}):AddColorPicker({
+        CurrentValue = Color3.fromRGB(0, 255, 0),
+        Callback = function(v)
+            Config.EyesColor = v
+            TitanManager:Refresh()
+        end
+    }, "EyesColor")
+    
+    -- Material (Shared)
+    local MiscGroup = TitanTab:CreateGroupbox({ Name = "Shared Settings", Column = 1 }, "MiscGroup")
+    MiscGroup:CreateLabel({Name = "Material"}):AddDropdown({
+        Options = {"ForceField", "Neon", "Plastic", "Glass"},
+        CurrentOptions = {"ForceField"},
+        Callback = function(v)
+            if type(v) == "table" then v = v[1] end
+            Config.HitboxMaterial = v
+            TitanManager:Refresh()
+        end
+    }, "MatDrop")
+
+    -- 4. Shifter Tab
+    local ShifterTab = MainSection:CreateTab({
+        Name = "Shifters",
+        Icon = NebulaIcons:GetIcon('flash_on', 'Material'),
+        Columns = 2
+    }, "ShifterTab")
+    ShifterTab:CreateGroupbox({Name = "Shifters", Column = 1}, "ShifterGroup"):CreateLabel({Name = "Coming Soon"}, "CS2")
+
+    -- 5. Settings Tab
+    local SettingsTab = MainSection:CreateTab({
+        Name = "Settings",
+        Icon = NebulaIcons:GetIcon('settings', 'Material'),
+        Columns = 2
+    }, "SettingsTab")
+    
+    local ConfigGroup = SettingsTab:CreateGroupbox({ Name = "Configuration", Column = 1 }, "ConfigGroup")
+    ConfigGroup:CreateButton({
+        Name = "Unload Script",
+        Callback = function()
+            SpoofEngine:RestoreAll()
+            Starlight:Destroy()
+        end
+    }, "UnloadBtn")
+    
+    -- Auto Load
     Starlight:LoadAutoloadConfig()
-    Starlight:OnDestroy(function()
-        SpoofEngine:Cleanup()
-        getgenv().AOT = nil
-        getgenv().AOT_CONFIG = nil
-    end)
 end
 
--- ============================================
--- INITIALIZE
--- ============================================
-print("╔═══════════════════════════════════════╗")
-print("║          LEVI HUB - Loaded            ║")
-print("╚═══════════════════════════════════════╝")
-
-if not IS_LOBBY then
-    SpoofEngine:SetupHooks()
-     task.spawn(function()
-         task.wait(1)
-         ScanAllTitans()
-         SetupTitanWatcher()
-     end)
-end
-
-SetupUI()
-print("[Levi Hub] Ready!")
+-- ============================================================================
+-- 5. MAIN EXECUTION
+-- ============================================================================
+SpoofEngine:Setup()
+TitanManager:StartLoop()
+Interface:Load()
+print("[Levi Hub] v0.0.01 Loaded")
