@@ -1,7 +1,7 @@
 --[[
     ╔═══════════════════════════════════════════════════════════╗
     ║                       LEVI HUB                            ║
-    ║                       v0.0.01                             ║
+    ║                       v0.0.02                             ║
     ╠═══════════════════════════════════════════════════════════╣
     ║  Hitbox Extender for Attack on Titan: Freedom War         ║
     ║  Anti-Cheat Bypass via Metatable Spoofing                 ║
@@ -12,24 +12,29 @@
 getgenv().SecureMode = true
 
 --// CONSTANTS
-local VERSION = "v0.0.01"
+local VERSION = "v0.0.02"
 local LOBBY_PLACE_ID = 11534222714
 local TITAN_CONTAINER = "OnGameTitans"
 local HITBOX_NAMES = { "Nape", "Eyes" }
 
+--// MATERIAL OPTIONS
+local MATERIAL_OPTIONS = {
+    "ForceField", "Neon", "Glass", "SmoothPlastic", 
+    "Plastic", "Metal", "DiamondPlate", "Foil"
+}
+
 --// SERVICES
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
 
 --// STATE
-local LocalPlayer = Players.LocalPlayer
+local Connections = {}  -- Store all connections for cleanup
 
 --// CONFIGURATION
 local Config = {
-    ShowHitboxes = false, -- Master visual toggle
     Nape = {
         Enabled = false,
+        ShowHitbox = false,  -- Per-category visual toggle
         MultX = 1,
         MultY = 1,
         MultZ = 1,
@@ -39,6 +44,7 @@ local Config = {
     },
     Eyes = {
         Enabled = false,
+        ShowHitbox = false,  -- Per-category visual toggle
         MultX = 1,
         MultY = 1,
         MultZ = 1,
@@ -86,9 +92,13 @@ function SpoofEngine:Apply(part, hitboxType)
     local multiplier = Vector3.new(config.MultX, config.MultY, config.MultZ)
     
     part.Size = original.Size * multiplier
-    part.Transparency = Config.ShowHitboxes and config.Transparency or original.Transparency
-    part.Color = Config.ShowHitboxes and config.Color or original.Color
-    part.Material = Config.ShowHitboxes and config.Material or original.Material
+    
+    -- Visual properties only if ShowHitbox is enabled for this category
+    if config.ShowHitbox then
+        part.Transparency = config.Transparency
+        part.Color = config.Color
+        part.Material = config.Material
+    end
     
     -- Mark as processed
     self.ProcessedParts[part] = true
@@ -98,12 +108,15 @@ function SpoofEngine:Restore(part)
     local original = self.SpoofedParts[part]
     if not original then return end
     
-    pcall(function()
-        part.Size = original.Size
-        part.Transparency = original.Transparency
-        part.Color = original.Color
-        part.Material = original.Material
-        part.BrickColor = original.BrickColor
+    -- Use pcall to handle destroyed parts
+    local success = pcall(function()
+        if part and part.Parent then
+            part.Size = original.Size
+            part.Transparency = original.Transparency
+            part.Color = original.Color
+            part.Material = original.Material
+            part.BrickColor = original.BrickColor
+        end
     end)
     
     self.SpoofedParts[part] = nil
@@ -111,16 +124,31 @@ function SpoofEngine:Restore(part)
 end
 
 function SpoofEngine:RestoreAll()
+    -- Create a copy of keys to avoid modification during iteration
+    local partsToRestore = {}
     for part, _ in pairs(self.SpoofedParts) do
+        table.insert(partsToRestore, part)
+    end
+    
+    for _, part in ipairs(partsToRestore) do
         self:Restore(part)
     end
+    
+    -- Clear tables
+    self.SpoofedParts = {}
+    self.ProcessedParts = {}
 end
 
 function SpoofEngine:RestoreByType(hitboxType)
+    local partsToRestore = {}
     for part, data in pairs(self.SpoofedParts) do
         if data.HitboxType == hitboxType then
-            self:Restore(part)
+            table.insert(partsToRestore, part)
         end
+    end
+    
+    for _, part in ipairs(partsToRestore) do
+        self:Restore(part)
     end
 end
 
@@ -131,24 +159,42 @@ function SpoofEngine:RefreshByType(hitboxType)
             if not config.Enabled then
                 self:Restore(part)
             else
-                local multiplier = Vector3.new(config.MultX, config.MultY, config.MultZ)
-                part.Size = data.Size * multiplier
-                part.Transparency = Config.ShowHitboxes and config.Transparency or data.Transparency
-                part.Color = Config.ShowHitboxes and config.Color or data.Color
-                part.Material = Config.ShowHitboxes and config.Material or data.Material
+                pcall(function()
+                    local multiplier = Vector3.new(config.MultX, config.MultY, config.MultZ)
+                    part.Size = data.Size * multiplier
+                    
+                    if config.ShowHitbox then
+                        part.Transparency = config.Transparency
+                        part.Color = config.Color
+                        part.Material = config.Material
+                    else
+                        part.Transparency = data.Transparency
+                        part.Color = data.Color
+                        part.Material = data.Material
+                    end
+                end)
             end
         end
     end
 end
 
-function SpoofEngine:RefreshVisuals()
-    -- Only update visual properties (color, transparency, material)
+function SpoofEngine:RefreshVisualsByType(hitboxType)
     for part, data in pairs(self.SpoofedParts) do
-        local config = Config[data.HitboxType]
-        if config and config.Enabled then
-            part.Transparency = Config.ShowHitboxes and config.Transparency or data.Transparency
-            part.Color = Config.ShowHitboxes and config.Color or data.Color
-            part.Material = Config.ShowHitboxes and config.Material or data.Material
+        if data.HitboxType == hitboxType then
+            local config = Config[hitboxType]
+            if config and config.Enabled then
+                pcall(function()
+                    if config.ShowHitbox then
+                        part.Transparency = config.Transparency
+                        part.Color = config.Color
+                        part.Material = config.Material
+                    else
+                        part.Transparency = data.Transparency
+                        part.Color = data.Color
+                        part.Material = data.Material
+                    end
+                end)
+            end
         end
     end
 end
@@ -195,6 +241,7 @@ end
 local TitanScanner = {}
 TitanScanner.Connection = nil
 TitanScanner.RefreshLoop = nil
+TitanScanner.Running = false
 
 function TitanScanner:FindHitbox(model, name, retries)
     retries = retries or 5
@@ -244,8 +291,11 @@ function TitanScanner:StartWatching()
         end
     end
     
+    self.Running = true
+    
     -- Watch for new titans
     self.Connection = container.DescendantAdded:Connect(function(desc)
+        if not self.Running then return end
         if desc:IsA("BasePart") and table.find(HITBOX_NAMES, desc.Name) then
             task.wait(0.1) -- Small delay for parent setup
             local parent = desc.Parent
@@ -260,8 +310,11 @@ function TitanScanner:StartWatching()
     
     -- Periodic refresh (for titans that spawn with delays)
     self.RefreshLoop = task.spawn(function()
-        while task.wait(3) do
-            self:ScanAll()
+        while self.Running do
+            task.wait(3)
+            if self.Running then
+                self:ScanAll()
+            end
         end
     end)
     
@@ -269,6 +322,8 @@ function TitanScanner:StartWatching()
 end
 
 function TitanScanner:Stop()
+    self.Running = false
+    
     if self.Connection then
         self.Connection:Disconnect()
         self.Connection = nil
@@ -326,10 +381,10 @@ function UI:SetupTabs()
     -- Main Section
     local MainSection = self.Window:CreateTabSection("Main")
     
-    -- General Tab
+    -- General Tab (using Lucide home icon which is more reliable)
     local GeneralTab = MainSection:CreateTab({
         Name = "General",
-        Icon = self.NebulaIcons:GetIcon('home', 'Material'),
+        Icon = self.NebulaIcons:GetIcon('home', 'Lucide'),
         Columns = 2
     }, "GeneralTab")
     
@@ -343,7 +398,7 @@ function UI:SetupTabs()
     -- Settings Tab
     local SettingsTab = MainSection:CreateTab({
         Name = "Settings",
-        Icon = self.NebulaIcons:GetIcon('settings', 'Material'),
+        Icon = self.NebulaIcons:GetIcon('settings', 'Lucide'),
         Columns = 2
     }, "SettingsTab")
     
@@ -381,7 +436,7 @@ function UI:SetupGeneralTab(tab)
     }, "Idx_Stats")
     
     -- Update stats periodically
-    task.spawn(function()
+    local statsLoop = task.spawn(function()
         while task.wait(2) do
             local stats = SpoofEngine:GetStats()
             pcall(function()
@@ -389,39 +444,10 @@ function UI:SetupGeneralTab(tab)
             end)
         end
     end)
+    table.insert(Connections, {type = "task", ref = statsLoop})
 end
 
 function UI:SetupTitansTab(tab)
-    -- Master Controls Group
-    local MasterGroup = tab:CreateGroupbox({
-        Name = "Master Controls",
-        Column = 1
-    }, "MasterGroup")
-    
-    MasterGroup:CreateToggle({
-        Name = "Show Hitboxes",
-        CurrentValue = Config.ShowHitboxes,
-        Callback = function(val)
-            Config.ShowHitboxes = val
-            SpoofEngine:RefreshVisuals()
-        end
-    }, "Idx_ShowHitboxes")
-    
-    MasterGroup:CreateDivider()
-    
-    -- Scan button
-    MasterGroup:CreateButton({
-        Name = "Force Scan Titans",
-        Callback = function()
-            TitanScanner:ScanAll()
-            self.Starlight:Notification({
-                Title = "Levi Hub",
-                Content = "Titan scan complete!",
-                Duration = 3
-            })
-        end
-    }, "Idx_ForceScan")
-    
     -- Nape Hitbox Group
     local NapeGroup = tab:CreateGroupbox({
         Name = "Nape Hitbox",
@@ -440,6 +466,15 @@ function UI:SetupTitansTab(tab)
             end
         end
     }, "Idx_NapeEnabled")
+    
+    NapeGroup:CreateToggle({
+        Name = "Show Hitbox",
+        CurrentValue = Config.Nape.ShowHitbox,
+        Callback = function(val)
+            Config.Nape.ShowHitbox = val
+            SpoofEngine:RefreshVisualsByType("Nape")
+        end
+    }, "Idx_NapeShowHitbox")
     
     NapeGroup:CreateSlider({
         Name = "Size X",
@@ -488,7 +523,7 @@ function UI:SetupTitansTab(tab)
         end
     }, "Idx_NapeTransparency")
     
-    -- Nape color picker (attached to label)
+    -- Nape color picker
     local napeColorLabel = NapeGroup:CreateLabel({
         Name = "Color"
     }, "Idx_NapeColorLabel")
@@ -500,6 +535,33 @@ function UI:SetupTitansTab(tab)
             SpoofEngine:RefreshByType("Nape")
         end
     }, "Idx_NapeColor")
+    
+    -- Nape material dropdown
+    local napeMaterialLabel = NapeGroup:CreateLabel({
+        Name = "Material"
+    }, "Idx_NapeMaterialLabel")
+    
+    napeMaterialLabel:AddDropdown({
+        Options = MATERIAL_OPTIONS,
+        CurrentOption = "ForceField",
+        Callback = function(val)
+            Config.Nape.Material = Enum.Material[val]
+            SpoofEngine:RefreshByType("Nape")
+        end
+    }, "Idx_NapeMaterial")
+    
+    -- Scan button
+    NapeGroup:CreateButton({
+        Name = "Force Scan Titans",
+        Callback = function()
+            TitanScanner:ScanAll()
+            self.Starlight:Notification({
+                Title = "Levi Hub",
+                Content = "Titan scan complete!",
+                Duration = 3
+            })
+        end
+    }, "Idx_ForceScan")
     
     -- Eyes Hitbox Group
     local EyesGroup = tab:CreateGroupbox({
@@ -519,6 +581,15 @@ function UI:SetupTitansTab(tab)
             end
         end
     }, "Idx_EyesEnabled")
+    
+    EyesGroup:CreateToggle({
+        Name = "Show Hitbox",
+        CurrentValue = Config.Eyes.ShowHitbox,
+        Callback = function(val)
+            Config.Eyes.ShowHitbox = val
+            SpoofEngine:RefreshVisualsByType("Eyes")
+        end
+    }, "Idx_EyesShowHitbox")
     
     EyesGroup:CreateSlider({
         Name = "Size X",
@@ -579,15 +650,23 @@ function UI:SetupTitansTab(tab)
             SpoofEngine:RefreshByType("Eyes")
         end
     }, "Idx_EyesColor")
+    
+    -- Eyes material dropdown
+    local eyesMaterialLabel = EyesGroup:CreateLabel({
+        Name = "Material"
+    }, "Idx_EyesMaterialLabel")
+    
+    eyesMaterialLabel:AddDropdown({
+        Options = MATERIAL_OPTIONS,
+        CurrentOption = "ForceField",
+        Callback = function(val)
+            Config.Eyes.Material = Enum.Material[val]
+            SpoofEngine:RefreshByType("Eyes")
+        end
+    }, "Idx_EyesMaterial")
 end
 
 function UI:SetupSettingsTab(tab)
-    -- Config Group
-    local ConfigGroup = tab:CreateGroupbox({
-        Name = "Configuration",
-        Column = 1
-    }, "ConfigGroup")
-    
     -- Built-in config system
     tab:BuildConfigGroupbox(1)
     
@@ -599,7 +678,7 @@ function UI:SetupSettingsTab(tab)
     
     ControlsGroup:CreateParagraph({
         Name = "Keybinds",
-        Content = "Insert - Toggle UI\nHome - Unload Script"
+        Content = "K - Toggle UI\nHome - Unload Script"
     }, "Idx_Keybinds")
     
     ControlsGroup:CreateDivider()
@@ -637,11 +716,13 @@ function UI:Destroy()
 end
 
 --// KEYBIND HANDLER
+local KeybindConnection = nil
+
 local function SetupKeybinds()
-    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    KeybindConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then return end
         
-        if input.KeyCode == Enum.KeyCode.Insert then
+        if input.KeyCode == Enum.KeyCode.K then
             UI:Toggle()
         elseif input.KeyCode == Enum.KeyCode.Home then
             Unload()
@@ -677,10 +758,27 @@ end
 function Unload()
     print("[Levi Hub] Unloading...")
     
-    -- Stop scanner
+    -- Stop scanner FIRST
     TitanScanner:Stop()
     
-    -- Restore all parts
+    -- Disconnect keybinds
+    if KeybindConnection then
+        KeybindConnection:Disconnect()
+        KeybindConnection = nil
+    end
+    
+    -- Cancel all tasks
+    for _, conn in ipairs(Connections) do
+        if conn.type == "task" then
+            pcall(function() task.cancel(conn.ref) end)
+        elseif conn.type == "connection" then
+            pcall(function() conn.ref:Disconnect() end)
+        end
+    end
+    Connections = {}
+    
+    -- Restore ALL hitboxes to original state
+    print("[Levi Hub] Restoring " .. tostring(SpoofEngine:GetStats().Total) .. " parts...")
     SpoofEngine:RestoreAll()
     
     -- Destroy UI
@@ -689,7 +787,7 @@ function Unload()
     -- Clear debug commands
     getgenv().AOT = nil
     
-    print("[Levi Hub] Unloaded successfully")
+    print("[Levi Hub] Unloaded successfully - all hitboxes restored")
 end
 
 --// INITIALIZATION
