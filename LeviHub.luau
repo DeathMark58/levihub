@@ -1,7 +1,7 @@
 --[[
     ╔═══════════════════════════════════════════════════════════╗
     ║                       LEVI HUB                            ║
-    ║                       v0.0.02                             ║
+    ║                       v0.0.03                             ║
     ╠═══════════════════════════════════════════════════════════╣
     ║  Hitbox Extender for Attack on Titan: Freedom War         ║
     ║  Anti-Cheat Bypass via Metatable Spoofing                 ║
@@ -12,10 +12,11 @@
 getgenv().SecureMode = true
 
 --// CONSTANTS
-local VERSION = "v0.0.02"
+local VERSION = "v0.0.03"
 local LOBBY_PLACE_ID = 11534222714
 local TITAN_CONTAINER = "OnGameTitans"
 local HITBOX_NAMES = { "Nape", "Eyes" }
+local MAIN_LOOP_INTERVAL = 3 -- seconds
 
 --// MATERIAL OPTIONS
 local MATERIAL_OPTIONS = {
@@ -24,17 +25,18 @@ local MATERIAL_OPTIONS = {
 }
 
 --// SERVICES
-local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 
 --// STATE
-local Connections = {}  -- Store all connections for cleanup
+local Running = true  -- Master flag for all loops
+local MainLoopThread = nil
+local KeybindConnection = nil
 
 --// CONFIGURATION
 local Config = {
     Nape = {
         Enabled = false,
-        ShowHitbox = false,  -- Per-category visual toggle
+        ShowHitbox = false,
         MultX = 1,
         MultY = 1,
         MultZ = 1,
@@ -44,7 +46,7 @@ local Config = {
     },
     Eyes = {
         Enabled = false,
-        ShowHitbox = false,  -- Per-category visual toggle
+        ShowHitbox = false,
         MultX = 1,
         MultY = 1,
         MultZ = 1,
@@ -56,8 +58,9 @@ local Config = {
 
 --// SPOOF ENGINE MODULE
 local SpoofEngine = {}
-SpoofEngine.SpoofedParts = {}    -- Original values storage
-SpoofEngine.ProcessedParts = {}  -- Duplicate prevention
+SpoofEngine.SpoofedParts = {}     -- [part] = {original data}
+SpoofEngine.ProcessedParts = {}   -- [part] = true
+SpoofEngine.TitanConnections = {} -- [titan model] = {death connection}
 SpoofEngine.HookInstalled = false
 SpoofEngine.OldIndex = nil
 
@@ -70,19 +73,31 @@ function SpoofEngine:StoreOriginal(part, hitboxType)
         Color = part.Color,
         Material = part.Material,
         BrickColor = part.BrickColor,
-        HitboxType = hitboxType
+        HitboxType = hitboxType,
+        TitanModel = part.Parent -- Store reference to titan model
     }
 end
 
 function SpoofEngine:Apply(part, hitboxType)
-    -- Validation
+    if not Running then return end
     if not part:IsA("BasePart") then return end
     if self.ProcessedParts[part] then return end
     
-    -- Get config for this hitbox type
     local config = Config[hitboxType]
     if not config then return end
     if not config.Enabled then return end
+    
+    -- Check if titan is alive before applying
+    local titanModel = part.Parent
+    if titanModel then
+        local humanoid = titanModel:FindFirstChildOfClass("Humanoid")
+        if humanoid and humanoid.Health <= 0 then
+            return -- Don't apply to dead titans
+        end
+        
+        -- Setup death listener for this titan
+        self:SetupTitanDeathListener(titanModel)
+    end
     
     -- Store originals BEFORE modification
     self:StoreOriginal(part, hitboxType)
@@ -93,23 +108,67 @@ function SpoofEngine:Apply(part, hitboxType)
     
     part.Size = original.Size * multiplier
     
-    -- Visual properties only if ShowHitbox is enabled for this category
     if config.ShowHitbox then
         part.Transparency = config.Transparency
         part.Color = config.Color
         part.Material = config.Material
     end
     
-    -- Mark as processed
     self.ProcessedParts[part] = true
+end
+
+function SpoofEngine:SetupTitanDeathListener(titanModel)
+    -- Skip if already listening
+    if self.TitanConnections[titanModel] then return end
+    
+    local humanoid = titanModel:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+    
+    -- Listen for death
+    local deathConnection = humanoid.Died:Connect(function()
+        self:CleanupTitan(titanModel)
+    end)
+    
+    -- Also listen for model removal (in case it's destroyed without dying)
+    local destroyConnection = titanModel.AncestryChanged:Connect(function(_, parent)
+        if not parent then
+            self:CleanupTitan(titanModel)
+        end
+    end)
+    
+    self.TitanConnections[titanModel] = {
+        death = deathConnection,
+        destroy = destroyConnection
+    }
+end
+
+function SpoofEngine:CleanupTitan(titanModel)
+    -- Disconnect listeners
+    local connections = self.TitanConnections[titanModel]
+    if connections then
+        if connections.death then connections.death:Disconnect() end
+        if connections.destroy then connections.destroy:Disconnect() end
+        self.TitanConnections[titanModel] = nil
+    end
+    
+    -- Find and restore all parts belonging to this titan
+    local partsToRestore = {}
+    for part, data in pairs(self.SpoofedParts) do
+        if data.TitanModel == titanModel then
+            table.insert(partsToRestore, part)
+        end
+    end
+    
+    for _, part in ipairs(partsToRestore) do
+        self:Restore(part)
+    end
 end
 
 function SpoofEngine:Restore(part)
     local original = self.SpoofedParts[part]
     if not original then return end
     
-    -- Use pcall to handle destroyed parts
-    local success = pcall(function()
+    pcall(function()
         if part and part.Parent then
             part.Size = original.Size
             part.Transparency = original.Transparency
@@ -124,7 +183,14 @@ function SpoofEngine:Restore(part)
 end
 
 function SpoofEngine:RestoreAll()
-    -- Create a copy of keys to avoid modification during iteration
+    -- Disconnect all titan connections first
+    for titanModel, connections in pairs(self.TitanConnections) do
+        if connections.death then pcall(function() connections.death:Disconnect() end) end
+        if connections.destroy then pcall(function() connections.destroy:Disconnect() end) end
+    end
+    self.TitanConnections = {}
+    
+    -- Restore all parts
     local partsToRestore = {}
     for part, _ in pairs(self.SpoofedParts) do
         table.insert(partsToRestore, part)
@@ -134,7 +200,6 @@ function SpoofEngine:RestoreAll()
         self:Restore(part)
     end
     
-    -- Clear tables
     self.SpoofedParts = {}
     self.ProcessedParts = {}
 end
@@ -199,12 +264,38 @@ function SpoofEngine:RefreshVisualsByType(hitboxType)
     end
 end
 
+function SpoofEngine:CleanupDeadTitans()
+    -- Check all tracked parts for dead titans
+    local partsToRestore = {}
+    
+    for part, data in pairs(self.SpoofedParts) do
+        local titanModel = data.TitanModel
+        if titanModel then
+            -- Check if titan model still exists
+            if not titanModel.Parent then
+                table.insert(partsToRestore, part)
+            else
+                -- Check if humanoid is dead
+                local humanoid = titanModel:FindFirstChildOfClass("Humanoid")
+                if humanoid and humanoid.Health <= 0 then
+                    table.insert(partsToRestore, part)
+                end
+            end
+        end
+    end
+    
+    for _, part in ipairs(partsToRestore) do
+        self:Restore(part)
+    end
+    
+    return #partsToRestore
+end
+
 function SpoofEngine:InstallHook()
     if self.HookInstalled then return end
     
     local oldIndex
     oldIndex = hookmetamethod(game, "__index", newcclosure(function(self, key)
-        -- Check if this part is spoofed and property is tracked
         if SpoofEngine.SpoofedParts[self] and SpoofEngine.SpoofedParts[self][key] then
             return SpoofEngine.SpoofedParts[self][key]
         end
@@ -220,7 +311,9 @@ function SpoofEngine:GetStats()
     local count = 0
     local napeCount = 0
     local eyesCount = 0
+    local titanCount = 0
     
+    local trackedTitans = {}
     for _, data in pairs(self.SpoofedParts) do
         count = count + 1
         if data.HitboxType == "Nape" then
@@ -228,41 +321,44 @@ function SpoofEngine:GetStats()
         elseif data.HitboxType == "Eyes" then
             eyesCount = eyesCount + 1
         end
+        if data.TitanModel and not trackedTitans[data.TitanModel] then
+            trackedTitans[data.TitanModel] = true
+            titanCount = titanCount + 1
+        end
     end
     
     return {
         Total = count,
         Nape = napeCount,
-        Eyes = eyesCount
+        Eyes = eyesCount,
+        Titans = titanCount,
+        Connections = 0
     }
 end
 
---// TITAN SCANNER MODULE
+--// TITAN SCANNER (no longer has its own loop - uses main loop)
 local TitanScanner = {}
-TitanScanner.Connection = nil
-TitanScanner.RefreshLoop = nil
-TitanScanner.Running = false
+TitanScanner.WatchConnection = nil
 
-function TitanScanner:FindHitbox(model, name, retries)
-    retries = retries or 5
+function TitanScanner:FindHitbox(model, name)
     local hitbox = model:FindFirstChild(name)
-    
     if hitbox and hitbox:IsA("BasePart") then
         return hitbox
     end
-    
-    -- Retry for late-loading parts
-    if retries > 0 then
-        task.wait(0.5)
-        return self:FindHitbox(model, name, retries - 1)
-    end
-    
     return nil
 end
 
 function TitanScanner:ProcessTitan(model)
+    if not Running then return end
+    
+    -- Check if titan is alive
+    local humanoid = model:FindFirstChildOfClass("Humanoid")
+    if humanoid and humanoid.Health <= 0 then
+        return
+    end
+    
     for _, hitboxName in ipairs(HITBOX_NAMES) do
-        local hitbox = self:FindHitbox(model, hitboxName, 3)
+        local hitbox = self:FindHitbox(model, hitboxName)
         if hitbox then
             SpoofEngine:Apply(hitbox, hitboxName)
         end
@@ -270,20 +366,25 @@ function TitanScanner:ProcessTitan(model)
 end
 
 function TitanScanner:ScanAll()
-    local container = workspace:FindFirstChild(TITAN_CONTAINER)
-    if not container then return end
+    if not Running then return end
     
+    local container = workspace:FindFirstChild(TITAN_CONTAINER)
+    if not container then return 0 end
+    
+    local processedCount = 0
     for _, titan in ipairs(container:GetChildren()) do
         if titan:IsA("Model") then
             self:ProcessTitan(titan)
+            processedCount = processedCount + 1
         end
     end
+    
+    return processedCount
 end
 
-function TitanScanner:StartWatching()
+function TitanScanner:SetupWatcher()
     local container = workspace:FindFirstChild(TITAN_CONTAINER)
     if not container then
-        -- Wait for container
         container = workspace:WaitForChild(TITAN_CONTAINER, 30)
         if not container then
             warn("[Levi Hub] Titan container not found!")
@@ -291,30 +392,12 @@ function TitanScanner:StartWatching()
         end
     end
     
-    self.Running = true
-    
-    -- Watch for new titans
-    self.Connection = container.DescendantAdded:Connect(function(desc)
-        if not self.Running then return end
-        if desc:IsA("BasePart") and table.find(HITBOX_NAMES, desc.Name) then
-            task.wait(0.1) -- Small delay for parent setup
-            local parent = desc.Parent
-            if parent and parent:IsA("Model") then
-                SpoofEngine:Apply(desc, desc.Name)
-            end
-        end
-    end)
-    
-    -- Initial scan
-    self:ScanAll()
-    
-    -- Periodic refresh (for titans that spawn with delays)
-    self.RefreshLoop = task.spawn(function()
-        while self.Running do
-            task.wait(3)
-            if self.Running then
-                self:ScanAll()
-            end
+    -- Watch for new titans (instant detection)
+    self.WatchConnection = container.ChildAdded:Connect(function(child)
+        if not Running then return end
+        if child:IsA("Model") then
+            task.wait(0.2) -- Small delay for parts to load
+            self:ProcessTitan(child)
         end
     end)
     
@@ -322,15 +405,37 @@ function TitanScanner:StartWatching()
 end
 
 function TitanScanner:Stop()
-    self.Running = false
-    
-    if self.Connection then
-        self.Connection:Disconnect()
-        self.Connection = nil
+    if self.WatchConnection then
+        self.WatchConnection:Disconnect()
+        self.WatchConnection = nil
     end
-    if self.RefreshLoop then
-        task.cancel(self.RefreshLoop)
-        self.RefreshLoop = nil
+end
+
+--// MAIN LOOP (single optimized loop for everything)
+local function StartMainLoop()
+    MainLoopThread = task.spawn(function()
+        print("[Levi Hub] Main loop started")
+        
+        while Running do
+            -- 1. Cleanup dead titans and orphaned parts
+            local cleaned = SpoofEngine:CleanupDeadTitans()
+            
+            -- 2. Scan for new titans (in case watcher missed any)
+            TitanScanner:ScanAll()
+            
+            -- Wait for next cycle
+            task.wait(MAIN_LOOP_INTERVAL)
+        end
+        
+        print("[Levi Hub] Main loop stopped")
+    end)
+end
+
+local function StopMainLoop()
+    Running = false
+    if MainLoopThread then
+        pcall(function() task.cancel(MainLoopThread) end)
+        MainLoopThread = nil
     end
 end
 
@@ -342,7 +447,6 @@ UI.NebulaIcons = nil
 UI.Visible = true
 
 function UI:Load()
-    -- Load Starlight
     local success, result = pcall(function()
         return loadstring(game:HttpGet("https://raw.nebulasoftworks.xyz/starlight"))()
     end)
@@ -353,8 +457,6 @@ function UI:Load()
     end
     
     self.Starlight = result
-    
-    -- Load Icons
     self.NebulaIcons = loadstring(game:HttpGet("https://raw.nebulasoftworks.xyz/nebula-icon-library-loader"))()
     
     return true
@@ -378,24 +480,20 @@ function UI:CreateWindow()
 end
 
 function UI:SetupTabs()
-    -- Main Section
     local MainSection = self.Window:CreateTabSection("Main")
     
-    -- General Tab (using Lucide home icon which is more reliable)
     local GeneralTab = MainSection:CreateTab({
         Name = "General",
         Icon = self.NebulaIcons:GetIcon('home', 'Lucide'),
         Columns = 2
     }, "GeneralTab")
     
-    -- Titans Tab
     local TitansTab = MainSection:CreateTab({
         Name = "Titans",
         Icon = self.NebulaIcons:GetIcon('crosshair', 'Lucide'),
         Columns = 2
     }, "TitansTab")
     
-    -- Settings Tab
     local SettingsTab = MainSection:CreateTab({
         Name = "Settings",
         Icon = self.NebulaIcons:GetIcon('settings', 'Lucide'),
@@ -410,7 +508,6 @@ function UI:SetupTabs()
 end
 
 function UI:SetupGeneralTab(tab)
-    -- Info Group
     local InfoGroup = tab:CreateGroupbox({
         Name = "Information",
         Column = 1
@@ -425,26 +522,25 @@ function UI:SetupGeneralTab(tab)
         Name = "Version: " .. VERSION
     }, "Idx_Version")
     
-    -- Stats Group
     local StatsGroup = tab:CreateGroupbox({
         Name = "Statistics",
         Column = 2
     }, "StatsGroup")
     
     local statsLabel = StatsGroup:CreateLabel({
-        Name = "Spoofed Parts: 0"
+        Name = "Loading..."
     }, "Idx_Stats")
     
-    -- Update stats periodically
-    local statsLoop = task.spawn(function()
-        while task.wait(2) do
+    -- Stats update is now part of main loop concept - but we do it via UI refresh
+    task.spawn(function()
+        while Running do
             local stats = SpoofEngine:GetStats()
             pcall(function()
-                statsLabel:SetName("Spoofed: " .. stats.Total .. " (N:" .. stats.Nape .. " E:" .. stats.Eyes .. ")")
+                statsLabel:SetName("Parts: " .. stats.Total .. " | Titans: " .. stats.Titans)
             end)
+            task.wait(2)
         end
     end)
-    table.insert(Connections, {type = "task", ref = statsLoop})
 end
 
 function UI:SetupTitansTab(tab)
@@ -523,7 +619,6 @@ function UI:SetupTitansTab(tab)
         end
     }, "Idx_NapeTransparency")
     
-    -- Nape color picker
     local napeColorLabel = NapeGroup:CreateLabel({
         Name = "Color"
     }, "Idx_NapeColorLabel")
@@ -536,7 +631,6 @@ function UI:SetupTitansTab(tab)
         end
     }, "Idx_NapeColor")
     
-    -- Nape material dropdown
     local napeMaterialLabel = NapeGroup:CreateLabel({
         Name = "Material"
     }, "Idx_NapeMaterialLabel")
@@ -550,14 +644,13 @@ function UI:SetupTitansTab(tab)
         end
     }, "Idx_NapeMaterial")
     
-    -- Scan button
     NapeGroup:CreateButton({
-        Name = "Force Scan Titans",
+        Name = "Force Scan",
         Callback = function()
-            TitanScanner:ScanAll()
+            local count = TitanScanner:ScanAll()
             self.Starlight:Notification({
                 Title = "Levi Hub",
-                Content = "Titan scan complete!",
+                Content = "Scanned " .. count .. " titans",
                 Duration = 3
             })
         end
@@ -638,7 +731,6 @@ function UI:SetupTitansTab(tab)
         end
     }, "Idx_EyesTransparency")
     
-    -- Eyes color picker
     local eyesColorLabel = EyesGroup:CreateLabel({
         Name = "Color"
     }, "Idx_EyesColorLabel")
@@ -651,7 +743,6 @@ function UI:SetupTitansTab(tab)
         end
     }, "Idx_EyesColor")
     
-    -- Eyes material dropdown
     local eyesMaterialLabel = EyesGroup:CreateLabel({
         Name = "Material"
     }, "Idx_EyesMaterialLabel")
@@ -667,10 +758,8 @@ function UI:SetupTitansTab(tab)
 end
 
 function UI:SetupSettingsTab(tab)
-    -- Built-in config system
     tab:BuildConfigGroupbox(1)
     
-    -- Controls Group
     local ControlsGroup = tab:CreateGroupbox({
         Name = "Controls",
         Column = 2
@@ -690,7 +779,6 @@ function UI:SetupSettingsTab(tab)
         end
     }, "Idx_UnloadBtn")
     
-    -- Credits Group
     local CreditsGroup = tab:CreateGroupbox({
         Name = "Credits",
         Column = 2
@@ -698,7 +786,7 @@ function UI:SetupSettingsTab(tab)
     
     CreditsGroup:CreateParagraph({
         Name = "Developers",
-        Content = "Levi Hub\nby DeathMark58\n\nUI: Starlight by Nebula Softworks"
+        Content = "Levi Hub\nby DeathMark58\n\nUI: Starlight"
     }, "Idx_Credits")
 end
 
@@ -716,8 +804,6 @@ function UI:Destroy()
 end
 
 --// KEYBIND HANDLER
-local KeybindConnection = nil
-
 local function SetupKeybinds()
     KeybindConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then return end
@@ -734,22 +820,19 @@ end
 local function SetupDebugCommands()
     getgenv().AOT = {
         Scan = function()
-            TitanScanner:ScanAll()
-            print("[Levi Hub] Manual scan complete")
+            local count = TitanScanner:ScanAll()
+            print("[Levi Hub] Scanned " .. count .. " titans")
         end,
-        Refresh = function()
-            SpoofEngine:RefreshByType("Nape")
-            SpoofEngine:RefreshByType("Eyes")
-            print("[Levi Hub] Refreshed all hitboxes")
+        Cleanup = function()
+            local cleaned = SpoofEngine:CleanupDeadTitans()
+            print("[Levi Hub] Cleaned up " .. cleaned .. " dead titan parts")
         end,
         Stats = function()
             local stats = SpoofEngine:GetStats()
-            print("[Levi Hub] Stats:", "Total:", stats.Total, "Nape:", stats.Nape, "Eyes:", stats.Eyes)
+            print("[Levi Hub] Parts:", stats.Total, "| Titans:", stats.Titans, "| Nape:", stats.Nape, "| Eyes:", stats.Eyes)
             return stats
         end,
-        Unload = function()
-            Unload()
-        end,
+        Unload = Unload,
         Config = Config
     }
 end
@@ -758,7 +841,13 @@ end
 function Unload()
     print("[Levi Hub] Unloading...")
     
-    -- Stop scanner FIRST
+    -- Stop running flag FIRST - this stops all loops
+    Running = false
+    
+    -- Stop main loop
+    StopMainLoop()
+    
+    -- Stop titan watcher
     TitanScanner:Stop()
     
     -- Disconnect keybinds
@@ -767,32 +856,22 @@ function Unload()
         KeybindConnection = nil
     end
     
-    -- Cancel all tasks
-    for _, conn in ipairs(Connections) do
-        if conn.type == "task" then
-            pcall(function() task.cancel(conn.ref) end)
-        elseif conn.type == "connection" then
-            pcall(function() conn.ref:Disconnect() end)
-        end
-    end
-    Connections = {}
-    
-    -- Restore ALL hitboxes to original state
-    print("[Levi Hub] Restoring " .. tostring(SpoofEngine:GetStats().Total) .. " parts...")
+    -- Restore ALL parts
+    local stats = SpoofEngine:GetStats()
+    print("[Levi Hub] Restoring " .. stats.Total .. " parts...")
     SpoofEngine:RestoreAll()
     
     -- Destroy UI
     UI:Destroy()
     
-    -- Clear debug commands
+    -- Clear debug
     getgenv().AOT = nil
     
-    print("[Levi Hub] Unloaded successfully - all hitboxes restored")
+    print("[Levi Hub] Unloaded - all restored")
 end
 
 --// INITIALIZATION
 local function Initialize()
-    -- Check if in lobby
     if game.PlaceId == LOBBY_PLACE_ID then
         warn("[Levi Hub] Cannot run in lobby! Use the Loader instead.")
         return
@@ -800,43 +879,46 @@ local function Initialize()
     
     print("[Levi Hub] Initializing " .. VERSION)
     
-    -- Install metatable hook
+    -- Install hook
     SpoofEngine:InstallHook()
     
     -- Load UI
-    if not UI:Load() then
-        warn("[Levi Hub] Failed to load UI, running headless")
-    else
+    if UI:Load() then
         UI:CreateWindow()
         local tabs = UI:SetupTabs()
         UI:SetupGeneralTab(tabs.General)
         UI:SetupTitansTab(tabs.Titans)
         UI:SetupSettingsTab(tabs.Settings)
-        
-        -- Load autoload config
         UI.Starlight:LoadAutoloadConfig()
+    else
+        warn("[Levi Hub] Failed to load UI, running headless")
     end
     
     -- Setup keybinds
     SetupKeybinds()
     
-    -- Setup debug commands
+    -- Setup debug
     SetupDebugCommands()
     
-    -- Start titan watcher
-    TitanScanner:StartWatching()
+    -- Setup titan watcher (instant detection)
+    TitanScanner:SetupWatcher()
+    
+    -- Initial scan
+    TitanScanner:ScanAll()
+    
+    -- Start main loop (single loop for cleanup + scanning)
+    StartMainLoop()
     
     -- Notification
     if UI.Starlight then
         UI.Starlight:Notification({
             Title = "Levi Hub",
-            Content = "Loaded successfully! " .. VERSION,
+            Content = "Loaded! " .. VERSION,
             Duration = 5
         })
     end
     
-    print("[Levi Hub] Initialization complete")
+    print("[Levi Hub] Ready")
 end
 
--- Run
 Initialize()
