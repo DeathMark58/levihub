@@ -1,19 +1,32 @@
 --[[
     ╔═══════════════════════════════════════════════════════════╗
     ║                       LEVI HUB                            ║
-    ║                       v0.0.03                             ║
+    ║                       v0.0.07                             ║
     ╠═══════════════════════════════════════════════════════════╣
     ║  Hitbox Extender for Attack on Titan: Freedom War         ║
     ║  Anti-Cheat Bypass via Metatable Spoofing                 ║
     ╚═══════════════════════════════════════════════════════════╝
 ]]
 
+--// ADONIS BYPASS (MUST RUN FIRST)
+local function LoadAdonisbypass()
+    local success, err = pcall(function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/Pixeluted/adoniscries/refs/heads/main/Source.lua"))()
+    end)
+    if success then
+        print("[Levi Hub] Adonis bypass loaded")
+    else
+        warn("[Levi Hub] Adonis bypass failed: " .. tostring(err))
+    end
+end
+LoadAdonisbypass()
+
 --// SECURE MODE (Anti-Detection)
 getgenv().SecureMode = true
 getgenv().StarlightNotify = false -- Disable "enjoying starlight" notification
 
 --// CONSTANTS
-local VERSION = "v0.0.05"
+local VERSION = "v0.0.07"
 local LOBBY_PLACE_ID = 11534222714
 local TITAN_CONTAINER = "OnGameTitans"
 local HITBOX_NAMES = { "Nape", "Eyes" }
@@ -59,23 +72,49 @@ local Config = {
 
 --// SPOOF ENGINE MODULE
 local SpoofEngine = {}
-SpoofEngine.SpoofedParts = {}     -- [part] = {original data}
+SpoofEngine.SpoofedValues = {}    -- [part] = {Size, Transparency, Color, Material, BrickColor} - ONLY valid properties
+SpoofEngine.PartMetadata = {}     -- [part] = {HitboxType, TitanModel} - Internal tracking, NOT returned by hook
 SpoofEngine.ProcessedParts = {}   -- [part] = true
 SpoofEngine.TitanConnections = {} -- [titan model] = {death connection}
 SpoofEngine.HookInstalled = false
 SpoofEngine.OldIndex = nil
 
+-- Properties that should be spoofed (returned by hook)
+local _SPOOFED_PROPERTIES = {
+    "Size",
+    "Transparency", 
+    "Color",
+    "Material",
+    "BrickColor"
+}
+
+-- Helper function to get property value (uses rawproperty if available)
+local function GetPropertyRaw(instance, propertyName)
+    if getrawproperty then
+        -- Use executor's raw property getter (bypasses hooks)
+        return getrawproperty(instance, propertyName)
+    else
+        -- Fallback to normal access
+        return instance[propertyName]
+    end
+end
+
 function SpoofEngine:StoreOriginal(part, hitboxType)
-    if self.SpoofedParts[part] then return end
+    if self.SpoofedValues[part] then return end
     
-    self.SpoofedParts[part] = {
-        Size = part.Size,
-        Transparency = part.Transparency,
-        Color = part.Color,
-        Material = part.Material,
-        BrickColor = part.BrickColor,
+    -- Store ONLY valid properties for spoofing (using rawproperty to bypass hooks)
+    self.SpoofedValues[part] = {
+        Size = GetPropertyRaw(part, "Size"),
+        Transparency = GetPropertyRaw(part, "Transparency"),
+        Color = GetPropertyRaw(part, "Color"),
+        Material = GetPropertyRaw(part, "Material"),
+        BrickColor = GetPropertyRaw(part, "BrickColor")
+    }
+    
+    -- Store metadata separately (NOT returned by hook)
+    self.PartMetadata[part] = {
         HitboxType = hitboxType,
-        TitanModel = part.Parent -- Store reference to titan model
+        TitanModel = part.Parent
     }
 end
 
@@ -104,7 +143,7 @@ function SpoofEngine:Apply(part, hitboxType)
     self:StoreOriginal(part, hitboxType)
     
     -- Apply modifications
-    local original = self.SpoofedParts[part]
+    local original = self.SpoofedValues[part]
     local multiplier = Vector3.new(config.MultX, config.MultY, config.MultZ)
     
     part.Size = original.Size * multiplier
@@ -154,8 +193,8 @@ function SpoofEngine:CleanupTitan(titanModel)
     
     -- Find and restore all parts belonging to this titan
     local partsToRestore = {}
-    for part, data in pairs(self.SpoofedParts) do
-        if data.TitanModel == titanModel then
+    for part, meta in pairs(self.PartMetadata) do
+        if meta.TitanModel == titanModel then
             table.insert(partsToRestore, part)
         end
     end
@@ -166,7 +205,7 @@ function SpoofEngine:CleanupTitan(titanModel)
 end
 
 function SpoofEngine:Restore(part)
-    local original = self.SpoofedParts[part]
+    local original = self.SpoofedValues[part]
     if not original then return end
     
     pcall(function()
@@ -179,7 +218,8 @@ function SpoofEngine:Restore(part)
         end
     end)
     
-    self.SpoofedParts[part] = nil
+    self.SpoofedValues[part] = nil
+    self.PartMetadata[part] = nil
     self.ProcessedParts[part] = nil
 end
 
@@ -193,7 +233,7 @@ function SpoofEngine:RestoreAll()
     
     -- Restore all parts
     local partsToRestore = {}
-    for part, _ in pairs(self.SpoofedParts) do
+    for part, _ in pairs(self.SpoofedValues) do
         table.insert(partsToRestore, part)
     end
     
@@ -201,14 +241,15 @@ function SpoofEngine:RestoreAll()
         self:Restore(part)
     end
     
-    self.SpoofedParts = {}
+    self.SpoofedValues = {}
+    self.PartMetadata = {}
     self.ProcessedParts = {}
 end
 
 function SpoofEngine:RestoreByType(hitboxType)
     local partsToRestore = {}
-    for part, data in pairs(self.SpoofedParts) do
-        if data.HitboxType == hitboxType then
+    for part, meta in pairs(self.PartMetadata) do
+        if meta.HitboxType == hitboxType then
             table.insert(partsToRestore, part)
         end
     end
@@ -219,24 +260,25 @@ function SpoofEngine:RestoreByType(hitboxType)
 end
 
 function SpoofEngine:RefreshByType(hitboxType)
-    for part, data in pairs(self.SpoofedParts) do
-        if data.HitboxType == hitboxType then
+    for part, meta in pairs(self.PartMetadata) do
+        if meta.HitboxType == hitboxType then
             local config = Config[hitboxType]
+            local original = self.SpoofedValues[part]
             if not config.Enabled then
                 self:Restore(part)
-            else
+            elseif original then
                 pcall(function()
                     local multiplier = Vector3.new(config.MultX, config.MultY, config.MultZ)
-                    part.Size = data.Size * multiplier
+                    part.Size = original.Size * multiplier
                     
                     if config.ShowHitbox then
                         part.Transparency = config.Transparency
                         part.Color = config.Color
                         part.Material = config.Material
                     else
-                        part.Transparency = data.Transparency
-                        part.Color = data.Color
-                        part.Material = data.Material
+                        part.Transparency = original.Transparency
+                        part.Color = original.Color
+                        part.Material = original.Material
                     end
                 end)
             end
@@ -245,19 +287,20 @@ function SpoofEngine:RefreshByType(hitboxType)
 end
 
 function SpoofEngine:RefreshVisualsByType(hitboxType)
-    for part, data in pairs(self.SpoofedParts) do
-        if data.HitboxType == hitboxType then
+    for part, meta in pairs(self.PartMetadata) do
+        if meta.HitboxType == hitboxType then
             local config = Config[hitboxType]
-            if config and config.Enabled then
+            local original = self.SpoofedValues[part]
+            if config and config.Enabled and original then
                 pcall(function()
                     if config.ShowHitbox then
                         part.Transparency = config.Transparency
                         part.Color = config.Color
                         part.Material = config.Material
                     else
-                        part.Transparency = data.Transparency
-                        part.Color = data.Color
-                        part.Material = data.Material
+                        part.Transparency = original.Transparency
+                        part.Color = original.Color
+                        part.Material = original.Material
                     end
                 end)
             end
@@ -269,8 +312,8 @@ function SpoofEngine:CleanupDeadTitans()
     -- Check all tracked parts for dead titans
     local partsToRestore = {}
     
-    for part, data in pairs(self.SpoofedParts) do
-        local titanModel = data.TitanModel
+    for part, meta in pairs(self.PartMetadata) do
+        local titanModel = meta.TitanModel
         if titanModel then
             -- Check if titan model still exists
             if not titanModel.Parent then
@@ -297,8 +340,10 @@ function SpoofEngine:InstallHook()
     
     local oldIndex
     oldIndex = hookmetamethod(game, "__index", newcclosure(function(self, key)
-        if SpoofEngine.SpoofedParts[self] and SpoofEngine.SpoofedParts[self][key] then
-            return SpoofEngine.SpoofedParts[self][key]
+        -- ONLY return spoofed values for valid properties
+        -- SpoofedValues only contains: Size, Transparency, Color, Material, BrickColor
+        if SpoofEngine.SpoofedValues[self] and SpoofEngine.SpoofedValues[self][key] then
+            return SpoofEngine.SpoofedValues[self][key]
         end
         return oldIndex(self, key)
     end))
@@ -315,15 +360,15 @@ function SpoofEngine:GetStats()
     local titanCount = 0
     
     local trackedTitans = {}
-    for _, data in pairs(self.SpoofedParts) do
+    for part, meta in pairs(self.PartMetadata) do
         count = count + 1
-        if data.HitboxType == "Nape" then
+        if meta.HitboxType == "Nape" then
             napeCount = napeCount + 1
-        elseif data.HitboxType == "Eyes" then
+        elseif meta.HitboxType == "Eyes" then
             eyesCount = eyesCount + 1
         end
-        if data.TitanModel and not trackedTitans[data.TitanModel] then
-            trackedTitans[data.TitanModel] = true
+        if meta.TitanModel and not trackedTitans[meta.TitanModel] then
+            trackedTitans[meta.TitanModel] = true
             titanCount = titanCount + 1
         end
     end
@@ -332,8 +377,7 @@ function SpoofEngine:GetStats()
         Total = count,
         Nape = napeCount,
         Eyes = eyesCount,
-        Titans = titanCount,
-        Connections = 0
+        Titans = titanCount
     }
 end
 
@@ -419,7 +463,7 @@ local function StartMainLoop()
         
         while Running do
             -- 1. Cleanup dead titans and orphaned parts
-            local cleaned = SpoofEngine:CleanupDeadTitans()
+            SpoofEngine:CleanupDeadTitans()
             
             -- 2. Scan for new titans (in case watcher missed any)
             TitanScanner:ScanAll()
@@ -825,8 +869,9 @@ end
 
 function UI:Toggle()
     self.Visible = not self.Visible
-    if self.Window then
-        self.Window:SetHidden(not self.Visible)
+    if self.Starlight and self.Starlight.Instance then
+        -- Toggle visibility of the UI instance
+        self.Starlight.Instance.Enabled = self.Visible
     end
 end
 
