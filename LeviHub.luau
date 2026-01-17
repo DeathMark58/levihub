@@ -1,5 +1,5 @@
 --[[
-    LEVI HUB - Monolithic Edition (Fixed Icons)
+    LEVI HUB - Monolithic Edition (Strict Fix)
     Attack on Titan: Freedom War
 ]]
 
@@ -313,25 +313,27 @@ local function SetupUI()
     end
     Starlight = result
     
-    -- Try load icons, but don't fail if they don't load
     pcall(function() NebulaIcons = loadstring(game:HttpGet("https://raw.nebulasoftworks.xyz/nebula-icon-library-loader"))() end)
 
-    -- Define default icon to fallback to (a generic ID)
-    -- This prevents 'nil' errors if icons fail to load
-    -- 6031302931 is a feather icon ID
-    local DEFAULT_ICON_ID = 6031302931 
-    local CROSSHAIR_ICON_ID = 6031763426 
-    local SETTINGS_ICON_ID = 6031280882
+    -- Define explicit fallback IDs as STRINGS to prevent concatenation errors
+    local DEFAULT_ICON = "rbxassetid://6031302931"
+    local CROSSHAIR_ICON = "rbxassetid://6031763426"
+    local SETTINGS_ICON = "rbxassetid://6031280882"
 
     local function GetIcon(name, lib)
+        local final_icon = DEFAULT_ICON
+        if name == 'crosshair' then final_icon = CROSSHAIR_ICON end
+        if name == 'settings' then final_icon = SETTINGS_ICON end
+
         if NebulaIcons then 
-            local ico = NebulaIcons:GetIcon(name, lib)
-            if ico then return ico end
+            local p_success, p_result = pcall(function() 
+                return NebulaIcons:GetIcon(name, lib or 'Material') 
+            end)
+            if p_success and p_result and type(p_result) == "string" and #p_result > 0 then
+                return p_result
+            end
         end
-        -- Fallback map
-        if name == 'crosshair' then return CROSSHAIR_ICON_ID end
-        if name == 'settings' then return SETTINGS_ICON_ID end
-        return DEFAULT_ICON_ID
+        return final_icon
     end
 
     local Window = Starlight:CreateWindow({
@@ -344,15 +346,20 @@ local function SetupUI()
     
     if IS_LOBBY then
         local MainSection = Window:CreateTabSection("Main")
-        local LobbyTab = MainSection:CreateTab({ Name = "Lobby", Columns = 1 })
+        local LobbyTab = MainSection:CreateTab({ Name = "Lobby", Columns = 1 }, "LobbyTab")
         local InfoBox = LobbyTab:CreateGroupbox({ Name = "Waiting", Column = 1 })
         InfoBox:CreateParagraph({ Name = "Status", Content = "You are in the lobby.\nFeature activation waiting for game join." })
         Starlight:Notification({ Title = "Levi Hub", Content = "Lobby Mode Active", Duration = 3 })
     else
         local MainSection = Window:CreateTabSection("Main")
         
-        -- Titans Tab (Using GetIcon which GUARANTEES a non-nil value)
-        local TitansTab = MainSection:CreateTab({ Name = "Titans", Icon = GetIcon('crosshair', 'Lucide') })
+        -- Titans Tab
+        -- Using GetIcon which now guarantees a string "rbxassetid://..."
+        local TitansTab = MainSection:CreateTab({ 
+            Name = "Titans", 
+            Icon = GetIcon('crosshair', 'Material'),
+            Columns = 2
+        }, "TitansTab")
         
         local MasterBox = TitansTab:CreateGroupbox({ Name = "Pure Titans", Column = 1 })
         MasterBox:CreateToggle({
@@ -388,7 +395,7 @@ local function SetupUI()
             CurrentOptions = {"ForceField"}, 
             Callback = function(o) 
                 if type(o) == "table" then getgenv().AOT_CONFIG.NapeMaterial = o[1] 
-                else getgenv().AOT_CONFIG.NapeMaterial = o end -- Handle different UI lib return types
+                else getgenv().AOT_CONFIG.NapeMaterial = o end 
                 RefreshAllHitboxes() 
             end 
         })
@@ -421,7 +428,12 @@ local function SetupUI()
             end 
         })
         
-        local SettingsTab = MainSection:CreateTab({ Name = "Settings", Icon = GetIcon('settings', 'Lucide') })
+        local SettingsTab = MainSection:CreateTab({ 
+            Name = "Settings", 
+            Icon = GetIcon('settings', 'Material'),
+            Columns = 1 
+        }, "SettingsTab")
+        
         local OptionsBox = SettingsTab:CreateGroupbox({ Name = "Options", Column = 1 })
         OptionsBox:CreateToggle({ Name = "Auto Refresh", CurrentValue = true, Callback = function(v) getgenv().AOT_CONFIG.AutoRefresh = v end })
         OptionsBox:CreateToggle({ Name = "Debug Mode", CurrentValue = false, Callback = function(v) getgenv().AOT_CONFIG.DebugMode = v end })
